@@ -218,7 +218,7 @@ final class Container implements ContainerInterface
         return $this->resolver->call($callable, $this, $overrides);
     }
 
-    // ── Providers & Scan ──────────────────────────────────────────────────────
+    // ── Providers ─────────────────────────────────────────────────────────────
 
     /**
      * Register a ServiceProvider — groups related bindings together.
@@ -234,55 +234,6 @@ final class Container implements ContainerInterface
             );
         }
         $provider->register($this);
-        return $this;
-    }
-
-    /**
-     * Scan a directory for classes annotated with #[Singleton], #[Request], or #[Transient]
-     * and register them automatically. The vendor/ directory is always excluded.
-     *
-     *   $container->scan(Kernel::$pathRoot);
-     *   $container->scan(Kernel::$pathRoot, [Kernel::$pathRoot . '/legacy']);
-     *
-     * @param string[] $exclude  Additional directories to skip
-     */
-    public function scan(string $rootDir, array $exclude = []): static
-    {
-        $exclude = array_merge([$rootDir . '/vendor'], $exclude);
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($rootDir, \RecursiveDirectoryIterator::SKIP_DOTS)
-        );
-
-        foreach ($iterator as $file) {
-            /** @var \SplFileInfo $file */
-            if ($file->getExtension() !== 'php') {
-                continue;
-            }
-
-            $realPath = $file->getRealPath();
-            foreach ($exclude as $ex) {
-                if (str_starts_with($realPath, (string) $ex)) {
-                    continue 2;
-                }
-            }
-
-            $class = $this->classFromFile($realPath);
-            if ($class === null || !class_exists($class)) {
-                continue;
-            }
-
-            $ref = new ReflectionClass($class);
-
-            if (!empty($ref->getAttributes(Singleton::class))) {
-                $this->bindings[$class] = ['concrete' => $class, 'scope' => 'singleton'];
-            } elseif (!empty($ref->getAttributes(Request::class))) {
-                $this->bindings[$class] = ['concrete' => $class, 'scope' => 'request'];
-            } elseif (!empty($ref->getAttributes(Transient::class))) {
-                $this->bindings[$class] = ['concrete' => $class, 'scope' => 'transient'];
-            }
-        }
-
         return $this;
     }
 
@@ -354,22 +305,4 @@ final class Container implements ContainerInterface
         return null;
     }
 
-    private function classFromFile(string $filePath): ?string
-    {
-        $content = file_get_contents($filePath);
-        if ($content === false) {
-            return null;
-        }
-
-        $namespace = '';
-        if (preg_match('/^namespace\s+([^;]+);/m', $content, $m)) {
-            $namespace = trim($m[1]) . '\\';
-        }
-
-        if (preg_match('/^(?:final\s+|abstract\s+|readonly\s+)*class\s+(\w+)/m', $content, $m)) {
-            return $namespace . $m[1];
-        }
-
-        return null;
-    }
 }

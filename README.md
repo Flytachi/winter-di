@@ -1,4 +1,8 @@
-# winter-di
+# Winter DI
+
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/flytachi/winter-di.svg)](https://packagist.org/packages/flytachi/winter-di)
+[![PHP Version Require](https://img.shields.io/packagist/php-v/flytachi/winter-di.svg?style=flat-square)](https://packagist.org/packages/flytachi/winter-di)
+[![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE)
 
 Lightweight PSR-11 dependency injection container for the Winter framework.
 Autowiring, three lifecycle scopes, attribute-based configuration, and service providers.
@@ -25,11 +29,17 @@ composer require flytachi/winter-di
 
 ```php
 use Flytachi\Winter\DI\Container;
+use Flytachi\Winter\DI\Scanner;
+use Flytachi\Winter\DI\Collector\DICollector;
 
 // bootstrap.php — once at application start
-Container::init()
-    ->scan(__DIR__ . '/src')              // auto-register #[Singleton], #[Request], #[Transient]
-    ->register(AppServiceProvider::class); // bind interfaces and factories
+$container = Container::init();
+
+Scanner::run(__DIR__ . '/src', cache: __DIR__ . '/var/cache/di.php')
+    ->collect(new DICollector($container))  // auto-register #[Singleton], #[Request], #[Transient]
+    ->execute();
+
+$container->register(AppServiceProvider::class); // bind interfaces and factories
 
 // Resolve anywhere
 $service = Container::getInstance()->make(UserService::class);
@@ -159,16 +169,36 @@ Container::init()
 
 ---
 
-## Directory scan
+## Scanner
+
+`Scanner` walks the project tree once and dispatches every discovered class to all
+registered `CollectorInterface` implementations — a single filesystem pass, multiple consumers.
 
 ```php
-Container::init()
-    ->scan(Kernel::$pathRoot)                        // auto-discover annotated classes
-    ->scan(Kernel::$pathRoot, ['/path/to/exclude']); // with exclusions
+use Flytachi\Winter\DI\Scanner;
+use Flytachi\Winter\DI\Collector\DICollector;
+
+// Without cache — always scans (dev mode, PPA, Cmd, Db collectors)
+Scanner::run($rootDir)
+    ->collect(new PpaCollector())
+    ->collect(new CmdCollector())
+    ->execute();
+
+// With cache — skips FS walk on cache hit (production)
+Scanner::run($rootDir, cache: '/var/cache/scanner.php')
+    ->collect(new DICollector($container))
+    ->collect(new MappingCollector($router))
+    ->execute();
+
+// Exclude additional directories (vendor/ is always excluded)
+Scanner::run($rootDir)
+    ->exclude(['/path/to/legacy', '/path/to/generated'])
+    ->collect(new DICollector($container))
+    ->execute();
 ```
 
-Finds all classes with `#[Singleton]`, `#[Request]`, or `#[Transient]` and registers them.
-The `vendor/` directory is always excluded. Manual registration always overrides scan.
+The cache stores only the list of discovered FQCNs as a plain PHP file — fast `require`,
+no serialization overhead. Delete the file to force a rescan.
 
 ---
 
@@ -200,4 +230,4 @@ Full documentation is available in [`docs/`](docs/):
 
 ## License
 
-MIT © [Flytachi](https://github.com/flytachi)
+MIT License. See [LICENSE](LICENSE).
