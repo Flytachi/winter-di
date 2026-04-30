@@ -68,6 +68,7 @@ Default scope when no attribute and no manual registration: **transient**.
 use Flytachi\Winter\DI\Attribute\Singleton;
 use Flytachi\Winter\DI\Attribute\Transient;
 use Flytachi\Winter\DI\Attribute\Request;
+use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
 
 // Scope on class
@@ -84,7 +85,7 @@ class QueryBuilder { }
 class UserService
 {
     public function __construct(
-        private UserRepository $repo,               // autowired by type
+        private UserRepository $repo,               // autowired by type (no attribute needed)
 
         #[Inject(FileCache::class)]
         private CacheInterface $fallback,           // specific implementation
@@ -97,10 +98,10 @@ class UserService
 // Property injection (when constructor is unavailable)
 class SomeCommand
 {
-    #[Inject]
+    #[Autowired]                                    // by declared type — idiomatic choice
     private UserService $service;
 
-    #[Inject(FileCache::class)]
+    #[Inject(FileCache::class)]                     // specific implementation override
     private CacheInterface $cache;
 }
 ```
@@ -222,7 +223,7 @@ Full documentation is available in [`docs/`](docs/):
 | [01-overview.md](docs/01-overview.md) | Features, installation, quick start |
 | [02-container.md](docs/02-container.md) | Complete Container API reference |
 | [03-scopes.md](docs/03-scopes.md) | Scopes — singleton, transient, request; Swoole behaviour |
-| [04-attributes.md](docs/04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Inject]` |
+| [04-attributes.md](docs/04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
 | [05-providers.md](docs/05-providers.md) | ServiceProvider — grouping bindings |
 | [06-scan.md](docs/06-scan.md) | Directory scan — auto-discovery |
 

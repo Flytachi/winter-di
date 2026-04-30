@@ -83,6 +83,38 @@ $container->request(AuthContext::class);
 
 ---
 
+## `#[Autowired]`
+
+```php
+use Flytachi\Winter\DI\Attribute\Autowired;
+```
+
+Injects a dependency by the **declared PHP type** — the idiomatic attribute for property injection.
+
+```php
+class SomeCommand extends Cmd
+{
+    #[Autowired]
+    private UserService $userService;
+
+    #[Autowired]
+    private LoggerInterface $logger;
+
+    public function handle(): void
+    {
+        $this->userService->sync();
+    }
+}
+```
+
+Property injection runs automatically after the constructor during `make()`.
+The property does not need to be public — `setAccessible(true)` is used internally.
+
+Use `#[Autowired]` when you want by-type resolution on a property.
+Use `#[Inject(...)]` when you need a specific class, a named binding, or a non-type-hinted value.
+
+---
+
 ## `#[Inject]`
 
 ```php
@@ -136,18 +168,22 @@ class ApiClient
 }
 ```
 
-### On a property — property injection
+### On a property — specific implementation or named value
 
-When constructor injection is not possible (parent class, legacy code):
+Use `#[Inject]` on a property when you need a non-default binding or a named scalar.
+For plain by-type injection prefer `#[Autowired]` (see above).
 
 ```php
 class SomeCommand extends Cmd
 {
-    #[Inject]
-    private UserService $userService;
+    #[Autowired]
+    private UserService $userService;          // by declared type → use #[Autowired]
 
     #[Inject(FileCache::class)]
-    private CacheInterface $cache;
+    private CacheInterface $cache;             // specific implementation override
+
+    #[Inject('config.timeout')]
+    private int $timeout;                      // named scalar — only #[Inject] can do this
 
     public function handle(): void
     {
