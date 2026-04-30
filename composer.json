@@ -1,0 +1,41 @@
+{
+    "name": "flytachi/winter-di",
+    "description": "Lightweight PSR-11 DI container for Winter framework (autowiring, scopes, attributes)",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["di", "container", "psr-11", "autowiring", "dependency-injection", "winter"],
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "test-detail": "vendor/bin/phpunit --testdox"
+    },
+    "support": {
+        "source": "https://github.com/flytachi/winter-di"
+    },
+    "autoload": {
+        "psr-4": {
+            "Flytachi\\Winter\\DI\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Flytachi\\Winter\\DI\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "php": ">=8.3",
+        "psr/container": "^2.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "@stable",
+        "squizlabs/php_codesniffer": "@stable"
+    },
+    "suggest": {
+        "ext-swoole": "Required for request scope coroutine isolation in Swoole runtime"
+    },
+    "authors": [
+        {
+            "name": "Flytachi",
+            "email": "jasur.rakhmatov03@gmail.com"
+        }
+    ]
+}
