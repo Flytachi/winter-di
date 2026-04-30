@@ -18,18 +18,22 @@ use ReflectionClass;
  * PSR-11 DI container with autowiring, scopes and attribute-based configuration.
  *
  * Bootstrap:
+ * ```
  *   Container::init()
  *       ->scan(Kernel::$pathRoot)
  *       ->register(AppServiceProvider::class);
+ * ```
  *
  * Resolution:
+ * ```
  *   $service = Container::getInstance()->make(UserService::class);
  *   $result  = Container::getInstance()->call([UserController::class, 'index']);
+ * ```
  *
  * Scopes:
- *   singleton — one instance per container (process)
- *   request   — one instance per HTTP request / coroutine
- *   transient — new instance on every make()
+ *   * singleton — one instance per container (process)
+ *   * request   — one instance per HTTP request / coroutine
+ *   * transient — new instance on every make()
  *
  * Default scope when no attribute and no manual registration: transient.
  */

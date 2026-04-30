@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\DI\Resolver;
 
+use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
 use Flytachi\Winter\DI\Container;
 use Flytachi\Winter\DI\Exception\ContainerException;
@@ -61,14 +62,16 @@ final class ReflectionResolver
                 continue;
             }
 
-            $attrs = $property->getAttributes(Inject::class);
-            if (empty($attrs)) {
+            $injectAttrs   = $property->getAttributes(Inject::class);
+            $autowiredAttrs = $property->getAttributes(Autowired::class);
+            if (empty($injectAttrs) && empty($autowiredAttrs)) {
                 continue;
             }
 
-            /** @var Inject $inject */
-            $inject = $attrs[0]->newInstance();
-            $type   = $inject->id ?? $property->getType()?->getName();
+            $id = !empty($injectAttrs)
+                ? $injectAttrs[0]->newInstance()->id
+                : null;
+            $type = $id ?? $property->getType()?->getName();
 
             if ($type === null) {
                 throw new ContainerException(
@@ -108,8 +111,11 @@ final class ReflectionResolver
     {
         $result = [];
         foreach ($parameters as $param) {
-            $injectAttr = $param->getAttributes(Inject::class);
-            $inject     = !empty($injectAttr) ? $injectAttr[0]->newInstance() : null;
+            $injectAttr    = $param->getAttributes(Inject::class);
+            $autowiredAttr = $param->getAttributes(Autowired::class);
+            $inject = !empty($injectAttr)
+                ? $injectAttr[0]->newInstance()
+                : (!empty($autowiredAttr) ? new Inject() : null);
 
             $type     = $param->getType();
             $typeName = ($type instanceof ReflectionNamedType && !$type->isBuiltin())

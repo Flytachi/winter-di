@@ -15,10 +15,12 @@ use Attribute;
  * NOT safe for Swoole if the class holds per-request state — use #[Request] instead.
  *
  * Example:
+ * ```
  *   #[Singleton]
  *   class UserService { ... }
+ * ```
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final class Singleton
+final readonly class Singleton
 {
 }

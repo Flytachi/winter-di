@@ -11,12 +11,14 @@ use Flytachi\Winter\DI\Container;
  *
  * Extend this class to organise interface → implementation mappings,
  * factory closures, and named values. Register providers in bootstrap:
- *
+ *```
  *   Container::init()
  *       ->register(AppServiceProvider::class)
  *       ->register(DatabaseServiceProvider::class);
+ * ```
  *
  * Example provider:
+ * ```
  *   class AppServiceProvider extends ServiceProvider
  *   {
  *       public function register(Container $c): void
@@ -28,6 +30,7 @@ use Flytachi\Winter\DI\Container;
  *           $c->set('config.timeout', 30);
  *       }
  *   }
+ * ```
  */
 abstract class ServiceProvider
 {

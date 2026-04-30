@@ -13,10 +13,12 @@ use Attribute;
  * Safe everywhere. Use for stateful objects: query builders, DTOs, form objects.
  *
  * Example:
+ * ```
  *   #[Transient]
  *   class QueryBuilder { ... }
+ * ```
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final class Transient
+final readonly class Transient
 {
 }

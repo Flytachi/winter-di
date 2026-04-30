@@ -16,10 +16,12 @@ use Attribute;
  * Use for classes that hold per-request state: auth context, request data, unit of work.
  *
  * Example:
+ * ```
  *   #[Request]
  *   class AuthContext { ... }
+ * ```
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final class Request
+final readonly class Request
 {
 }

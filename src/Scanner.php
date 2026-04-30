@@ -12,17 +12,21 @@ use ReflectionClass;
  * each discovered class to all registered collectors.
  *
  * Without cache (always scans — use for PPA, Cmd, Db, dev mode):
+ * ```
  *   Scanner::run($rootDir)
  *       ->collect(new PpaCollector())
  *       ->collect(new CmdCollector())
  *       ->execute();
+ * ```
  *
  * With cache (production — filesystem walk only on first boot):
+ * ```
  *   Scanner::run($rootDir, cache: $cachePath)
  *       ->collect(new DICollector($container))
  *       ->collect(new MappingCollector($router))
  *       ->collect(new ExceptionCollector())
  *       ->execute();
+ * ```
  *
  * Multiple collectors share a single filesystem pass — no duplicate tree walks.
  * The cache stores only the list of discovered FQCNs, not collector results.

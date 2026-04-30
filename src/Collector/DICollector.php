@@ -14,15 +14,18 @@ use ReflectionClass;
 /**
  * Built-in collector — registers classes annotated with DI scope attributes.
  *
+ *
  * Registers:
- *   #[Singleton] → $container->singleton($class)
- *   #[Request]   → $container->request($class)
- *   #[Transient] → $container->transient($class)
+ *   * #[Singleton] → $container->singleton($class)
+ *   * #[Request]   → $container->request($class)
+ *   * #[Transient] → $container->transient($class)
  *
  * Usage:
+ * ```
  *   Scanner::run($rootDir)->collect(new DICollector($container))->execute();
+ * ```
  */
-final class DICollector implements CollectorInterface
+final readonly class DICollector implements CollectorInterface
 {
     public function __construct(private readonly Container $container) {}
 
