@@ -203,6 +203,25 @@ no serialization overhead. Delete the file to force a rescan.
 
 ---
 
+## ReflectionCache
+
+Per-process cache for reflection objects. Creates each `ReflectionClass`,
+`ReflectionMethod`, and `ReflectionParameter[]` once and reuses it for the
+process lifetime — critical in Swoole where workers handle many requests.
+
+```php
+use Flytachi\Winter\DI\ReflectionCache;
+
+$ref    = ReflectionCache::classOf(UserService::class);   // ReflectionClass
+$method = ReflectionCache::method(UserService::class, 'handle'); // ReflectionMethod
+$params = ReflectionCache::parameters(UserService::class, 'handle'); // ReflectionParameter[]
+```
+
+Used internally by `ReflectionResolver` — available as a public utility for
+frameworks and libraries that perform their own reflection-based parameter resolution.
+
+---
+
 ## Exceptions
 
 | Exception | When |
@@ -226,6 +245,7 @@ Full documentation is available in [`docs/`](docs/):
 | [04-attributes.md](docs/04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
 | [05-providers.md](docs/05-providers.md) | ServiceProvider — grouping bindings |
 | [06-scan.md](docs/06-scan.md) | Directory scan — auto-discovery |
+| [07-reflection-cache.md](docs/07-reflection-cache.md) | ReflectionCache — per-process reflection object cache |
 
 ---
 

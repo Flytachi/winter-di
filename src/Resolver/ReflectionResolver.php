@@ -9,7 +9,7 @@ use Flytachi\Winter\DI\Attribute\Inject;
 use Flytachi\Winter\DI\Container;
 use Flytachi\Winter\DI\Exception\ContainerException;
 use Flytachi\Winter\DI\Exception\NotFoundException;
-use ReflectionClass;
+use Flytachi\Winter\DI\ReflectionCache;
 use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionNamedType;
@@ -41,7 +41,7 @@ final class ReflectionResolver
         if (is_array($callable)) {
             [$target, $method] = $callable;
             $instance = is_string($target) ? $container->make($target) : $target;
-            $ref    = new ReflectionMethod($instance, $method);
+            $ref    = ReflectionCache::method($instance::class, $method);
             $params = $this->methodParams($ref);
             $args   = $this->buildArgs($params, $container, $overrides);
             return $ref->invoke($instance, ...$args);
@@ -55,7 +55,7 @@ final class ReflectionResolver
 
     public function injectProperties(object $instance, Container $container): void
     {
-        $ref = new ReflectionClass($instance);
+        $ref = ReflectionCache::classOf($instance::class);
         foreach ($ref->getProperties() as $property) {
             // Skip constructor-promoted properties — already set via constructor injection
             if ($property->isPromoted()) {
@@ -92,8 +92,7 @@ final class ReflectionResolver
             return self::$cache[$key];
         }
 
-        $ref         = new ReflectionClass($class);
-        $constructor = $ref->getConstructor();
+        $constructor = ReflectionCache::classOf($class)->getConstructor();
 
         return self::$cache[$key] = $constructor
             ? $this->extractParams($constructor->getParameters())
