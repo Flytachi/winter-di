@@ -272,9 +272,15 @@ final class Container implements ContainerInterface
 
         if (class_exists($abstract)) {
             $ref = new ReflectionClass($abstract);
-            if (!empty($ref->getAttributes(Singleton::class))) return 'singleton';
-            if (!empty($ref->getAttributes(Request::class)))  return 'request';
-            if (!empty($ref->getAttributes(Transient::class))) return 'transient';
+            if (!empty($ref->getAttributes(Singleton::class))) {
+                return 'singleton';
+            }
+            if (!empty($ref->getAttributes(Request::class))) {
+                return 'request';
+            }
+            if (!empty($ref->getAttributes(Transient::class))) {
+                return 'transient';
+            }
         }
 
         return 'transient';
@@ -308,5 +314,4 @@ final class Container implements ContainerInterface
         }
         return null;
     }
-
 }

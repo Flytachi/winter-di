@@ -14,7 +14,7 @@ use ReflectionParameter;
  * Creates each reflection object once and reuses it for the process lifetime.
  * Critical for Swoole workers — reflection is expensive and requests share memory.
  *
- * ```php
+ * ```
  * $ref    = ReflectionCache::classOf(UserService::class);
  * $method = ReflectionCache::method(UserService::class, 'handle');
  * $params = ReflectionCache::parameters(UserService::class, 'handle');

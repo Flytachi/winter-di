@@ -27,7 +27,9 @@ use ReflectionClass;
  */
 final readonly class DICollector implements CollectorInterface
 {
-    public function __construct(private readonly Container $container) {}
+    public function __construct(private readonly Container $container)
+    {
+    }
 
     public function collect(string $class, ReflectionClass $ref): void
     {

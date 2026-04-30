@@ -28,4 +28,6 @@ use Attribute;
  * ```
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
-final readonly class Autowired {}
+final readonly class Autowired
+{
+}

@@ -41,7 +41,7 @@ final class Scanner
     private array $exclude = [];
 
     private function __construct(
-        private readonly string  $rootDir,
+        private readonly string $rootDir,
         private readonly ?string $cachePath,
     ) {
         $this->exclude[] = rtrim($rootDir, '/\\') . DIRECTORY_SEPARATOR . 'vendor';
