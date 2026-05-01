@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Flytachi\Winter\DI;
 
 use ReflectionClass;
+use ReflectionEnum;
 use ReflectionMethod;
 use ReflectionParameter;
 
@@ -16,6 +17,7 @@ use ReflectionParameter;
  *
  * ```
  * $ref    = ReflectionCache::classOf(UserService::class);
+ * $enum   = ReflectionCache::enumOf(Status::class);
  * $method = ReflectionCache::method(UserService::class, 'handle');
  * $params = ReflectionCache::parameters(UserService::class, 'handle');
  * ```
@@ -24,6 +26,9 @@ final class ReflectionCache
 {
     /** @var array<string, ReflectionClass<object>> */
     private static array $classes = [];
+
+    /** @var array<string, ReflectionEnum<object>> */
+    private static array $enums = [];
 
     /** @var array<string, ReflectionMethod> */
     private static array $methods = [];
@@ -35,6 +40,12 @@ final class ReflectionCache
     public static function classOf(string $class): ReflectionClass
     {
         return self::$classes[$class] ??= new ReflectionClass($class);
+    }
+
+    /** @return ReflectionEnum<object> */
+    public static function enumOf(string $class): ReflectionEnum
+    {
+        return self::$enums[$class] ??= new ReflectionEnum($class);
     }
 
     public static function method(string $class, string $method): ReflectionMethod

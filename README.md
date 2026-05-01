@@ -213,6 +213,7 @@ process lifetime — critical in Swoole where workers handle many requests.
 use Flytachi\Winter\DI\ReflectionCache;
 
 $ref    = ReflectionCache::classOf(UserService::class);   // ReflectionClass
+$enum   = ReflectionCache::enumOf(Status::class);   // ReflectionEnum
 $method = ReflectionCache::method(UserService::class, 'handle'); // ReflectionMethod
 $params = ReflectionCache::parameters(UserService::class, 'handle'); // ReflectionParameter[]
 ```

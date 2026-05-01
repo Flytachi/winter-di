@@ -2,7 +2,7 @@
 
 `ReflectionCache` is a per-process cache for PHP reflection objects.
 
-Each `ReflectionClass`, `ReflectionMethod`, and `ReflectionParameter[]` is created
+Each `ReflectionClass`, `ReflectionEnum`, `ReflectionMethod`, and `ReflectionParameter[]` is created
 once on first access and reused for the entire process lifetime. In Swoole workers,
 where a single process handles thousands of requests, this eliminates repeated
 reflection construction on the hot path.
@@ -25,6 +25,16 @@ $ref = ReflectionCache::classOf(UserService::class);
 $ref->getProperties();   // ReflectionProperty[]
 $ref->getConstructor();  // ReflectionMethod|null
 $ref->getAttributes();   // ReflectionAttribute[]
+```
+
+### `enumOf(string $enum): ReflectionEnum`
+
+Returns a cached `ReflectionEnum` for the given FQCN.
+
+```php
+$ref = ReflectionCache::enumOf(UserService::class);
+
+$ref->getBackingType();   // ReflectionNamedType|null
 ```
 
 ### `method(string $class, string $method): ReflectionMethod`
