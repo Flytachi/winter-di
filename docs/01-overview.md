@@ -13,6 +13,7 @@ It provides autowiring, three lifecycle scopes, attribute-based configuration, a
 - **Attributes** — `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]`
 - **Directory scan** — `Scanner` auto-discovers and registers annotated classes
 - **Service providers** — group related bindings in one place
+- **Contextual binding** — `contextual()` factories receive the consuming class (e.g. per-class loggers)
 - **Method injection** — `call()` resolves parameters of any callable
 - **Property injection** — `#[Autowired]` / `#[Inject]` on class properties
 - **Circular dependency detection** — throws on cycles
@@ -59,7 +60,7 @@ $result = Container::getInstance()->call([UserController::class, 'index']);
 | # | File | Contents |
 |---|------|----------|
 | 01 | [01-overview.md](01-overview.md) | Features, installation, quick start |
-| 02 | [02-container.md](02-container.md) | Container API — init, make, call, bind, set |
+| 02 | [02-container.md](02-container.md) | Container API — init, make, call, bind, contextual, set |
 | 03 | [03-scopes.md](03-scopes.md) | Scopes — singleton, transient, request; Swoole behaviour |
 | 04 | [04-attributes.md](04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
 | 05 | [05-providers.md](05-providers.md) | ServiceProvider — grouping bindings |

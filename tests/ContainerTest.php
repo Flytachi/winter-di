@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\DI\Tests;
 
+use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
 use Flytachi\Winter\DI\Attribute\Request;
 use Flytachi\Winter\DI\Attribute\Singleton;
@@ -93,6 +94,24 @@ class ServiceWithSpecificPropertyInject
 {
     #[Inject(ArrayCache::class)]
     public CacheInterface $cache;
+}
+
+class ContextTag
+{
+    public function __construct(public readonly ?string $owner = null) {}
+}
+
+class ConsumerCtorContext
+{
+    public function __construct(
+        #[Autowired] public readonly ContextTag $tag,
+    ) {}
+}
+
+class ConsumerPropContext
+{
+    #[Autowired]
+    public ContextTag $tag;
 }
 
 class CircularA
@@ -308,6 +327,65 @@ final class ContainerTest extends TestCase
     {
         $service = $this->c->make(ServiceWithSpecificPropertyInject::class);
         $this->assertInstanceOf(ArrayCache::class, $service->cache);
+    }
+
+    // ── contextual() bindings ─────────────────────────────────────────────────
+
+    public function test_contextual_passes_consumer_to_constructor(): void
+    {
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag($consumer));
+        $service = $this->c->make(ConsumerCtorContext::class);
+        $this->assertSame(ConsumerCtorContext::class, $service->tag->owner);
+    }
+
+    public function test_contextual_passes_consumer_to_property(): void
+    {
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag($consumer));
+        $service = $this->c->make(ConsumerPropContext::class);
+        $this->assertSame(ConsumerPropContext::class, $service->tag->owner);
+    }
+
+    public function test_contextual_is_ignored_by_direct_make(): void
+    {
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag($consumer));
+        // contextual applies to injection only — a direct make() resolves the class normally
+        $this->assertNull($this->c->make(ContextTag::class)->owner);
+    }
+
+    public function test_contextual_result_differs_per_consumer_and_is_not_cached(): void
+    {
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag($consumer));
+        $a = $this->c->make(ConsumerCtorContext::class);
+        $b = $this->c->make(ConsumerPropContext::class);
+        $this->assertSame(ConsumerCtorContext::class, $a->tag->owner);
+        $this->assertSame(ConsumerPropContext::class, $b->tag->owner);
+        $this->assertNotSame($a->tag, $b->tag);
+    }
+
+    public function test_make_contextual_falls_back_to_make_without_binding(): void
+    {
+        // no contextual() registered → behaves like a plain make()
+        $tag = $this->c->makeContextual(ContextTag::class, 'Some\\Consumer');
+        $this->assertNull($tag->owner);
+    }
+
+    public function test_contextual_overlays_binding_injection_wins_make_uses_binding(): void
+    {
+        // a regular binding governs direct make(); the contextual overlay governs injection
+        $this->c->bind(ContextTag::class, fn() => new ContextTag('plain'));
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag($consumer));
+
+        // injection → contextual (consumer-aware), regardless of registration order
+        $this->assertSame(ConsumerCtorContext::class, $this->c->make(ConsumerCtorContext::class)->tag->owner);
+        // direct make() → the regular binding
+        $this->assertSame('plain', $this->c->make(ContextTag::class)->owner);
+    }
+
+    public function test_contextual_re_registration_overrides_factory(): void
+    {
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag('first'));
+        $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag('second'));
+        $this->assertSame('second', $this->c->make(ConsumerPropContext::class)->tag->owner);
     }
 
     // ── call() ────────────────────────────────────────────────────────────────

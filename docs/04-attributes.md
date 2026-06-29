@@ -110,6 +110,12 @@ class SomeCommand extends Cmd
 Property injection runs automatically after the constructor during `make()`.
 The property does not need to be public — `setAccessible(true)` is used internally.
 
+> An interface like `LoggerInterface` cannot be autowired on its own — it needs
+> a binding. For a logger named after the consuming class, register a
+> [`contextual()`](02-container.md#contextualstring-abstract-callable-factory-static)
+> factory; then `#[Autowired] private LoggerInterface $logger;` resolves to
+> `LoggerFactory::getLogger(static::class)` automatically.
+
 Use `#[Autowired]` when you want by-type resolution on a property.
 Use `#[Inject(...)]` when you need a specific class, a named binding, or a non-type-hinted value.
 

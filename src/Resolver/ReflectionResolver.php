@@ -32,7 +32,7 @@ final class ReflectionResolver
             return new $class();
         }
 
-        $args = $this->buildArgs($params, $container, $overrides);
+        $args = $this->buildArgs($params, $container, $overrides, $class);
         return new $class(...$args);
     }
 
@@ -43,7 +43,7 @@ final class ReflectionResolver
             $instance = is_string($target) ? $container->make($target) : $target;
             $ref    = ReflectionCache::method($instance::class, $method);
             $params = $this->methodParams($ref);
-            $args   = $this->buildArgs($params, $container, $overrides);
+            $args   = $this->buildArgs($params, $container, $overrides, $instance::class);
             return $ref->invoke($instance, ...$args);
         }
 
@@ -79,7 +79,8 @@ final class ReflectionResolver
                 );
             }
 
-            $property->setValue($instance, $container->make($type));
+            // consumer = the class being injected into → enables contextual() factories
+            $property->setValue($instance, $container->makeContextual($type, $instance::class));
         }
     }
 
@@ -133,7 +134,7 @@ final class ReflectionResolver
         return $result;
     }
 
-    private function buildArgs(array $params, Container $container, array $overrides): array
+    private function buildArgs(array $params, Container $container, array $overrides, ?string $consumer = null): array
     {
         $args = [];
         foreach ($params as $p) {
@@ -147,7 +148,7 @@ final class ReflectionResolver
             if ($p['inject'] !== null) {
                 $id = $p['inject']->id ?? $p['type'];
                 if ($id !== null) {
-                    $args[] = $container->make($id);
+                    $args[] = $container->makeContextual($id, $consumer);
                     continue;
                 }
             }
@@ -155,7 +156,7 @@ final class ReflectionResolver
             // Autowire by type
             if ($p['type'] !== null) {
                 try {
-                    $args[] = $container->make($p['type']);
+                    $args[] = $container->makeContextual($p['type'], $consumer);
                     continue;
                 } catch (NotFoundException $e) {
                     if ($p['hasDefault']) {

@@ -126,6 +126,11 @@ $c->bind(MailerInterface::class, fn(Container $c) =>
     new SmtpMailer(env('MAIL_HOST'), $c->make(LoggerInterface::class))
 );
 
+// Consumer-aware factory — receives the class being injected into
+$c->contextual(LoggerInterface::class, fn(Container $c, ?string $consumer) =>
+    LoggerFactory::getLogger($consumer ?? 'app')                 // #[Autowired] LoggerInterface → per-class logger
+);
+
 // Resolution
 $service = $c->make(UserService::class);
 $service = $c->make(UserService::class, ['timeout' => 60]); // with overrides

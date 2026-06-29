@@ -93,6 +93,44 @@ $c->request(UnitOfWork::class, fn($c) => new UnitOfWork($c->make(Connection::cla
 
 ---
 
+### `contextual(string $abstract, callable $factory): static`
+
+Registers a **consumer-aware** factory. Unlike `bind()`, the factory also
+receives the *consumer* — the class the dependency is being injected into —
+so it can tailor the instance per consumer. The classic use is a logger named
+after the class that uses it:
+
+```php
+$c->contextual(
+    LoggerInterface::class,
+    fn(Container $c, ?string $consumer) => LoggerFactory::getLogger($consumer ?? 'app'),
+);
+```
+
+```php
+class MainController {
+    #[Autowired] private LoggerInterface $logger;   // → getLogger(MainController::class)
+}
+```
+
+Semantics (an **overlay**, like contextual binding in other containers):
+
+- Applies during **dependency injection only** — constructor parameters,
+  method parameters (via `call()`), and `#[Autowired]` / `#[Inject]` properties.
+- At injection time it **takes precedence** over a regular `bind()`/`singleton()`/…
+  of the same `$abstract`. A direct `make()` / `get()` is unaffected — it still
+  uses the regular binding (or resolves the class normally).
+- **Override** by re-registering: a later `contextual()` for the same `$abstract`
+  replaces the factory. (Plain bindings and the contextual overlay coexist — they
+  are not "last write wins".)
+- The result is **never cached** by the container — the factory runs on every
+  injection. Give it its own cache if the build is expensive (e.g.
+  `LoggerFactory` already caches per `channel:class`).
+- `$consumer` is the consumer's FQCN, or `null` for free-closure injection
+  (`call(fn(LoggerInterface $l) => …)`) where there is no owning class.
+
+---
+
 ### `set(string $id, mixed $value): static`
 
 Stores a pre-built value or scalar under a named key.
@@ -152,6 +190,15 @@ $result = $container->call(fn(UserService $s, AuthContext $a) => $s->current($a-
 // With overrides
 $result = $container->call([ImportJob::class, 'run'], ['chunkSize' => 100]);
 ```
+
+---
+
+### `makeContextual(string $abstract, ?string $consumer): mixed`
+
+The resolver's entry point for contextual injection: if a `contextual()`
+factory is registered for `$abstract`, it is invoked with `$consumer` (result
+not cached); otherwise it delegates to `make()`. Application code normally uses
+`make()` — this exists for the injection machinery and is rarely called directly.
 
 ---
 

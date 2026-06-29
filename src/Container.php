@@ -54,6 +54,14 @@ final class Container implements ContainerInterface
      */
     private array $resolved = [];
 
+    /**
+     * @var array<string, callable>
+     * Consumer-aware factories registered via contextual(). Each factory receives
+     * (Container $c, ?string $consumer) and is invoked only during dependency
+     * injection — its result is never cached and a direct make()/get() ignores it.
+     */
+    private array $contextual = [];
+
     /** @var array<string, true> Circular dependency guard */
     private array $building = [];
 
@@ -151,6 +159,27 @@ final class Container implements ContainerInterface
     }
 
     /**
+     * Register a consumer-aware factory for an abstract.
+     *
+     * Unlike bind(), the factory also receives the CONSUMER class — the class the
+     * dependency is being injected into — so it can tailor the instance per consumer
+     * (e.g. a logger named after the class that uses it):
+     *
+     *   $c->contextual(LoggerInterface::class,
+     *       fn(Container $c, ?string $consumer) => LoggerFactory::getLogger($consumer ?? 'app'));
+     *
+     * Applies during constructor / method / property injection only and acts as an
+     * overlay: at injection time it takes precedence over a regular bind()/singleton()/…
+     * of $abstract, while a direct make()/get() still uses the regular binding. The
+     * result is never cached (the factory owns identity). Re-register to override.
+     */
+    public function contextual(string $abstract, callable $factory): static
+    {
+        $this->contextual[$abstract] = $factory;
+        return $this;
+    }
+
+    /**
      * Register a named scalar value or pre-built instance.
      *
      *   $c->set('config.timeout', 30);
@@ -206,6 +235,21 @@ final class Container implements ContainerInterface
         } finally {
             unset($this->building[$abstract]);
         }
+    }
+
+    /**
+     * Resolve an abstract for a specific consumer class (the class it is injected into).
+     *
+     * If a contextual() factory is registered for $abstract, it is invoked with the
+     * consumer (result not cached); otherwise this is a plain make($abstract). Used by
+     * the resolver for dependency injection — application code calls make().
+     */
+    public function makeContextual(string $abstract, ?string $consumer): mixed
+    {
+        if (isset($this->contextual[$abstract])) {
+            return ($this->contextual[$abstract])($this, $consumer);
+        }
+        return $this->make($abstract);
     }
 
     /**
