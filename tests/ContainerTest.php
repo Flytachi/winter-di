@@ -6,6 +6,7 @@ namespace Flytachi\Winter\DI\Tests;
 
 use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
+use Flytachi\Winter\DI\Attribute\Lazy;
 use Flytachi\Winter\DI\Attribute\Request;
 use Flytachi\Winter\DI\Attribute\Singleton;
 use Flytachi\Winter\DI\Attribute\Transient;
@@ -112,6 +113,33 @@ class ConsumerPropContext
 {
     #[Autowired]
     public ContextTag $tag;
+}
+
+class LazyCycleA
+{
+    #[Lazy]
+    public LazyCycleB $b;            // proxy — make(LazyCycleB) deferred → breaks the cycle
+    public string $tag = 'A';
+}
+
+class LazyCycleB
+{
+    #[Autowired]
+    public LazyCycleA $a;            // eager back-reference
+    public string $tag = 'B';
+}
+
+class LazyCtorConsumer
+{
+    public function __construct(
+        #[Lazy] public SingletonService $svc,
+    ) {}
+}
+
+class LazyInterfaceConsumer
+{
+    #[Lazy]
+    public CacheInterface $cache;    // interface — nothing concrete to proxy → error
 }
 
 class CircularA
@@ -386,6 +414,40 @@ final class ContainerTest extends TestCase
         $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag('first'));
         $this->c->contextual(ContextTag::class, fn(Container $c, ?string $consumer) => new ContextTag('second'));
         $this->assertSame('second', $this->c->make(ConsumerPropContext::class)->tag->owner);
+    }
+
+    // ── #[Lazy] ───────────────────────────────────────────────────────────────
+
+    public function test_lazy_property_breaks_circular_dependency(): void
+    {
+        // LazyCycleA ⇄ LazyCycleB — would throw "Circular dependency" if $b were eager
+        $a = $this->c->make(LazyCycleA::class);
+        $this->assertSame('A', $a->tag);
+        $this->assertInstanceOf(LazyCycleB::class, $a->b);   // proxy is type-compatible
+        $this->assertSame('B', $a->b->tag);                  // first access initializes the real instance
+        $this->assertSame('A', $a->b->a->tag);               // back-reference resolves
+    }
+
+    public function test_lazy_proxy_is_uninitialized_until_accessed(): void
+    {
+        $a   = $this->c->make(LazyCycleA::class);
+        $ref = new \ReflectionClass(LazyCycleB::class);
+        $this->assertTrue($ref->isUninitializedLazyObject($a->b));   // not built yet
+        $a->b->tag;                                                  // touch → initialize
+        $this->assertFalse($ref->isUninitializedLazyObject($a->b));
+    }
+
+    public function test_lazy_constructor_param_injects_proxy(): void
+    {
+        $consumer = $this->c->make(LazyCtorConsumer::class);
+        $this->assertInstanceOf(SingletonService::class, $consumer->svc);
+        $this->assertIsInt($consumer->svc->id);              // resolves on first access
+    }
+
+    public function test_lazy_on_interface_without_concrete_throws(): void
+    {
+        $this->expectException(ContainerException::class);
+        $this->c->make(LazyInterfaceConsumer::class);
     }
 
     // ── call() ────────────────────────────────────────────────────────────────

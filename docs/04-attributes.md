@@ -198,5 +198,46 @@ class SomeCommand extends Cmd
 }
 ```
 
-Property injection runs automatically after the constructor during `make()`.
-The property does not need to be public — `setAccessible(true)` is used internally.
+Property injection (both `#[Autowired]` and `#[Inject]`) runs automatically after
+the constructor during `make()`. The property does not need to be public —
+`setAccessible(true)` is used internally.
+
+---
+
+## `#[Lazy]`
+
+```php
+use Flytachi\Winter\DI\Attribute\Lazy;
+```
+
+Injects a **native lazy proxy** (PHP 8.4 `ReflectionClass::newLazyProxy()`) instead
+of resolving the dependency immediately. The real instance is built from the
+container on **first access**. This is the `@Lazy` of Spring — its main job is to
+**break circular dependencies**: only one side of the cycle needs to be lazy.
+
+```php
+class SmsSendService
+{
+    #[Lazy]
+    private FakeSendService $peer;   // proxy now; make() runs on first $this->peer->…()
+}
+
+class FakeSendService
+{
+    #[Autowired]
+    private SmsSendService $peer;     // eager back-reference — the cycle no longer recurses
+}
+```
+
+Usable on properties and constructor parameters, alone or combined with
+`#[Autowired]` / `#[Inject]`.
+
+- The proxy stands in for a **concrete class**, so the type must be (or resolve to)
+  one. For an interface, name the concrete: `#[Inject(SmsSendService::class), Lazy]`.
+  A bare `#[Lazy]` on an interface throws a clear `ContainerException`.
+- The proxy is fully type-compatible (`instanceof` the real class) and stays
+  uninitialised until first use (`ReflectionClass::isUninitializedLazyObject()`).
+
+> Prefer redesigning a true circular dependency (extract the shared part into a
+> third service). `#[Lazy]` is the pragmatic escape hatch when that isn't worth it —
+> same stance as Spring.

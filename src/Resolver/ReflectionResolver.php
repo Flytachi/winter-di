@@ -6,6 +6,7 @@ namespace Flytachi\Winter\DI\Resolver;
 
 use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
+use Flytachi\Winter\DI\Attribute\Lazy;
 use Flytachi\Winter\DI\Container;
 use Flytachi\Winter\DI\Exception\ContainerException;
 use Flytachi\Winter\DI\Exception\NotFoundException;
@@ -62,9 +63,10 @@ final class ReflectionResolver
                 continue;
             }
 
-            $injectAttrs   = $property->getAttributes(Inject::class);
+            $injectAttrs    = $property->getAttributes(Inject::class);
             $autowiredAttrs = $property->getAttributes(Autowired::class);
-            if (empty($injectAttrs) && empty($autowiredAttrs)) {
+            $lazyAttrs      = $property->getAttributes(Lazy::class);
+            if (empty($injectAttrs) && empty($autowiredAttrs) && empty($lazyAttrs)) {
                 continue;
             }
 
@@ -79,8 +81,11 @@ final class ReflectionResolver
                 );
             }
 
+            // #[Lazy] → inject a deferred proxy; otherwise resolve now.
             // consumer = the class being injected into → enables contextual() factories
-            $property->setValue($instance, $container->makeContextual($type, $instance::class));
+            $property->setValue($instance, empty($lazyAttrs)
+                ? $container->makeContextual($type, $instance::class)
+                : $this->lazyProxy($type, $container, $instance::class));
         }
     }
 
@@ -126,6 +131,7 @@ final class ReflectionResolver
                 'name'       => $param->getName(),
                 'type'       => $typeName,
                 'inject'     => $inject,
+                'lazy'       => !empty($param->getAttributes(Lazy::class)),
                 'optional'   => $param->isOptional(),
                 'hasDefault' => $param->isDefaultValueAvailable(),
                 'default'    => $param->isDefaultValueAvailable() ? $param->getDefaultValue() : null,
@@ -148,13 +154,19 @@ final class ReflectionResolver
             if ($p['inject'] !== null) {
                 $id = $p['inject']->id ?? $p['type'];
                 if ($id !== null) {
-                    $args[] = $container->makeContextual($id, $consumer);
+                    $args[] = $p['lazy']
+                        ? $this->lazyProxy($id, $container, $consumer)
+                        : $container->makeContextual($id, $consumer);
                     continue;
                 }
             }
 
             // Autowire by type
             if ($p['type'] !== null) {
+                if ($p['lazy']) {
+                    $args[] = $this->lazyProxy($p['type'], $container, $consumer);
+                    continue;
+                }
                 try {
                     $args[] = $container->makeContextual($p['type'], $consumer);
                     continue;
@@ -182,5 +194,30 @@ final class ReflectionResolver
             );
         }
         return $args;
+    }
+
+    /**
+     * Build a native lazy proxy (PHP 8.4) for $type — resolution is deferred to
+     * first access, which is how a #[Lazy] injection breaks a circular dependency.
+     * The proxy must stand in for a concrete class; interfaces / abstracts cannot
+     * be proxied (pair #[Lazy] with #[Inject(Concrete::class)] for those).
+     */
+    private function lazyProxy(string $type, Container $container, ?string $consumer): object
+    {
+        if (!class_exists($type)) {
+            throw new ContainerException(
+                "#[Lazy] requires a concrete class to proxy, got [{$type}]. "
+                . 'Pair it with #[Inject(Concrete::class)] for interface-typed dependencies.'
+            );
+        }
+
+        $ref = ReflectionCache::classOf($type);
+        if ($ref->isAbstract()) {
+            throw new ContainerException("#[Lazy] cannot proxy an abstract class [{$type}].");
+        }
+
+        return $ref->newLazyProxy(
+            static fn(object $proxy): object => $container->makeContextual($type, $consumer)
+        );
     }
 }

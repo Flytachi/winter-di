@@ -34,7 +34,7 @@ use Attribute;
  * ```
  *   #[Inject(RedisCache::class)]
  *   private CacheInterface $cache;
- *```
+ * ```
  */
 #[Attribute(Attribute::TARGET_PARAMETER | Attribute::TARGET_PROPERTY)]
 final readonly class Inject

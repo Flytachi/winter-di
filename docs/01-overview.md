@@ -10,7 +10,8 @@ It provides autowiring, three lifecycle scopes, attribute-based configuration, a
 - **PSR-11** compliant (`ContainerInterface`)
 - **Autowiring** — constructor parameters resolved automatically by type
 - **Three scopes** — `singleton`, `transient`, `request`
-- **Attributes** — `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]`
+- **Attributes** — `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]`, `#[Lazy]`
+- **Lazy injection** — `#[Lazy]` injects a native PHP 8.4 proxy; resolves on first use (breaks circular deps, like Spring `@Lazy`)
 - **Directory scan** — `Scanner` auto-discovers and registers annotated classes
 - **Service providers** — group related bindings in one place
 - **Contextual binding** — `contextual()` factories receive the consuming class (e.g. per-class loggers)
