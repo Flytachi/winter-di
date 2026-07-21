@@ -16,7 +16,8 @@ It provides autowiring, three lifecycle scopes, attribute-based configuration, a
 - **Service providers** — group related bindings in one place
 - **Contextual binding** — `contextual()` factories receive the consuming class (e.g. per-class loggers)
 - **Method injection** — `call()` resolves parameters of any callable
-- **Property injection** — `#[Autowired]` / `#[Inject]` on class properties
+- **Property injection** — `#[Autowired]` / `#[Inject]` on class properties, inherited private ones included
+- **Proxy-aware** — `ProxyInterface` keeps a generated subclass resolving under the identity it stands for
 - **Circular dependency detection** — throws on cycles
 - **Swoole-safe** — `request` scope uses `Coroutine::getContext()` for isolation
 - **ReflectionCache** — per-process cache for `ReflectionClass` / `ReflectionMethod` / `ReflectionParameter[]`
@@ -66,4 +67,5 @@ $result = Container::getInstance()->call([UserController::class, 'index']);
 | 04 | [04-attributes.md](04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
 | 05 | [05-providers.md](05-providers.md) | ServiceProvider — grouping bindings |
 | 06 | [06-scan.md](06-scan.md) | Scanner — directory scan, collectors, cache |
-| 07 | [07-reflection-cache.md](07-reflection-cache.md) | ReflectionCache — per-process reflection object cache |
+| 07 | [07-reflection-cache.md](07-reflection-cache.md) | ReflectionCache — per-process reflection object cache, injection plan |
+| 08 | [08-proxies.md](08-proxies.md) | ProxyInterface — generated subclasses that stand in for a service |

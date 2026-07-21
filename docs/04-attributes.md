@@ -108,7 +108,24 @@ class SomeCommand extends Cmd
 ```
 
 Property injection runs automatically after the constructor during `make()`.
-The property does not need to be public — `setAccessible(true)` is used internally.
+The property does not need to be public — reflection writes it directly.
+
+Inherited properties are injected too, **including private ones declared in a
+parent class**. The resolver walks the class hierarchy rather than trusting
+`ReflectionClass::getProperties()`, which omits a parent's private declarations:
+
+```php
+abstract class BaseCommand
+{
+    #[Autowired]
+    private UserService $userService;   // injected in every subclass
+}
+
+class SyncCommand extends BaseCommand {}
+```
+
+A property redeclared in a subclass is resolved from the most derived
+declaration, matching normal PHP semantics.
 
 > An interface like `LoggerInterface` cannot be autowired on its own — it needs
 > a binding. For a logger named after the consuming class, register a
@@ -200,7 +217,8 @@ class SomeCommand extends Cmd
 
 Property injection (both `#[Autowired]` and `#[Inject]`) runs automatically after
 the constructor during `make()`. The property does not need to be public —
-`setAccessible(true)` is used internally.
+reflection writes it directly — and inherited private properties are injected as
+well (see [`#[Autowired]`](#autowired) above).
 
 ---
 

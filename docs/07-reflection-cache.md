@@ -92,7 +92,29 @@ Swoole worker: N requests → 1 reflection build (N-1 cache hits)
 |--------|-----------|
 | `resolve()` → `constructorParams()` | `classOf($class)->getConstructor()` |
 | `call()` | `method($instance::class, $method)` |
-| `injectProperties()` | `classOf($instance::class)->getProperties()` |
+| `injectProperties()` → `injectionPlan()` | `classOf($class)->getProperties()`, walked up the hierarchy |
+
+---
+
+## The injection plan
+
+`ReflectionCache` caches reflection *objects*; the resolver additionally caches
+the *decisions* it derives from them.
+
+Property injection has to answer three questions per property: is it annotated,
+what type does it need, and is it lazy. Answering them means calling
+`getAttributes()` and instantiating attribute objects — work that does not
+change between resolutions. `ReflectionResolver` therefore builds an **injection
+plan** once per class (a flat list of property, type and laziness) and reuses it
+for the process lifetime, exactly like the constructor metadata beside it.
+
+The effect is largest where it hurts most: `transient` and `request` scoped
+classes, which are rebuilt constantly. A service with three injected properties
+resolves roughly **twice as fast** as it would with per-resolution attribute
+reading.
+
+The plan is keyed by the class the instance stands for — see
+[Proxies](08-proxies.md) — so a proxy and its target share one entry.
 
 ---
 

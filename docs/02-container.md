@@ -128,6 +128,9 @@ Semantics (an **overlay**, like contextual binding in other containers):
   `LoggerFactory` already caches per `channel:class`).
 - `$consumer` is the consumer's FQCN, or `null` for free-closure injection
   (`call(fn(LoggerInterface $l) => …)`) where there is no owning class.
+- If the consumer is a generated proxy, `$consumer` is the class it **stands
+  for**, not the generated name — see [Proxies](08-proxies.md). A per-class
+  logger keeps its channel when a service is proxied.
 
 ---
 

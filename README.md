@@ -104,6 +104,13 @@ class SomeCommand
     #[Inject(FileCache::class)]                     // specific implementation override
     private CacheInterface $cache;
 }
+
+// Inherited properties are injected too, private ones included
+abstract class BaseCommand
+{
+    #[Autowired]
+    private LoggerInterface $logger;
+}
 ```
 
 ---
@@ -251,7 +258,8 @@ Full documentation is available in [`docs/`](docs/):
 | [04-attributes.md](docs/04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
 | [05-providers.md](docs/05-providers.md) | ServiceProvider — grouping bindings |
 | [06-scan.md](docs/06-scan.md) | Directory scan — auto-discovery |
-| [07-reflection-cache.md](docs/07-reflection-cache.md) | ReflectionCache — per-process reflection object cache |
+| [07-reflection-cache.md](docs/07-reflection-cache.md) | ReflectionCache — per-process reflection object cache, injection plan |
+| [08-proxies.md](docs/08-proxies.md) | ProxyInterface — generated subclasses that stand in for a service |
 
 ---
 

@@ -8,6 +8,7 @@ use Flytachi\Winter\DI\Attribute\Autowired;
 use Flytachi\Winter\DI\Attribute\Inject;
 use Flytachi\Winter\DI\Attribute\Lazy;
 use Flytachi\Winter\DI\Container;
+use Flytachi\Winter\DI\Contract\ProxyInterface;
 use Flytachi\Winter\DI\Exception\ContainerException;
 use Flytachi\Winter\DI\Exception\NotFoundException;
 use Flytachi\Winter\DI\ReflectionCache;
@@ -15,11 +16,15 @@ use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionParameter;
+use ReflectionProperty;
 
 final class ReflectionResolver
 {
     /** @var array<string, list<array>> Cached parameter metadata keyed by class/method */
     private static array $cache = [];
+
+    /** @var array<string, class-string> Concrete class name mapped to the identity it stands for */
+    private static array $origins = [];
 
     public function resolve(string $class, Container $container, array $overrides = []): object
     {
@@ -33,7 +38,7 @@ final class ReflectionResolver
             return new $class();
         }
 
-        $args = $this->buildArgs($params, $container, $overrides, $class);
+        $args = $this->buildArgs($params, $container, $overrides, self::originOf($class));
         return new $class(...$args);
     }
 
@@ -44,7 +49,7 @@ final class ReflectionResolver
             $instance = is_string($target) ? $container->make($target) : $target;
             $ref    = ReflectionCache::method($instance::class, $method);
             $params = $this->methodParams($ref);
-            $args   = $this->buildArgs($params, $container, $overrides, $instance::class);
+            $args   = $this->buildArgs($params, $container, $overrides, self::originOf($instance::class));
             return $ref->invoke($instance, ...$args);
         }
 
@@ -56,40 +61,102 @@ final class ReflectionResolver
 
     public function injectProperties(object $instance, Container $container): void
     {
-        $ref = ReflectionCache::classOf($instance::class);
-        foreach ($ref->getProperties() as $property) {
-            // Skip constructor-promoted properties — already set via constructor injection
-            if ($property->isPromoted()) {
-                continue;
-            }
+        // consumer = the class being injected into → enables contextual() factories.
+        // For a proxy that is the class it stands for, not the generated name.
+        $consumer = self::originOf($instance::class);
 
-            $injectAttrs    = $property->getAttributes(Inject::class);
-            $autowiredAttrs = $property->getAttributes(Autowired::class);
-            $lazyAttrs      = $property->getAttributes(Lazy::class);
-            if (empty($injectAttrs) && empty($autowiredAttrs) && empty($lazyAttrs)) {
-                continue;
-            }
-
-            $id = !empty($injectAttrs)
-                ? $injectAttrs[0]->newInstance()->id
-                : null;
-            $type = $id ?? $property->getType()?->getName();
-
-            if ($type === null) {
-                throw new ContainerException(
-                    "Cannot inject property [{$property->getName()}] — no type and no #[Inject] id."
-                );
-            }
-
+        foreach ($this->injectionPlan($consumer) as $slot) {
             // #[Lazy] → inject a deferred proxy; otherwise resolve now.
-            // consumer = the class being injected into → enables contextual() factories
-            $property->setValue($instance, empty($lazyAttrs)
-                ? $container->makeContextual($type, $instance::class)
-                : $this->lazyProxy($type, $container, $instance::class));
+            $slot['property']->setValue($instance, $slot['lazy']
+                ? $this->lazyProxy($slot['type'], $container, $consumer)
+                : $container->makeContextual($slot['type'], $consumer));
         }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Resolve the identity a concrete class stands for.
+     *
+     * Everything consumer-aware — contextual() factories, the injection plan —
+     * must see the class the application wrote, not a generated subclass.
+     *
+     * @param class-string $class
+     * @return class-string
+     */
+    private static function originOf(string $class): string
+    {
+        return self::$origins[$class] ??= is_subclass_of($class, ProxyInterface::class)
+            ? $class::proxyTarget()
+            : $class;
+    }
+
+    /**
+     * Build — once per class — the list of properties that need injecting.
+     *
+     * The walk goes up the hierarchy instead of relying on
+     * `ReflectionClass::getProperties()` alone, because that list omits private
+     * properties declared in a parent. Without the walk an inherited
+     * `#[Autowired] private` dependency is silently left null.
+     *
+     * A redeclared property is taken from the most derived class that declares
+     * it, matching normal PHP resolution.
+     *
+     * @param class-string $class
+     * @return list<array{property: ReflectionProperty, type: string, lazy: bool}>
+     */
+    private function injectionPlan(string $class): array
+    {
+        $key = 'props:' . $class;
+        if (isset(self::$cache[$key])) {
+            return self::$cache[$key];
+        }
+
+        $plan = [];
+        $seen = [];
+
+        for ($ref = ReflectionCache::classOf($class); $ref !== false; $ref = $ref->getParentClass()) {
+            foreach ($ref->getProperties() as $property) {
+                // Only declarations of this level; inherited ones are handled when we get there.
+                if ($property->getDeclaringClass()->getName() !== $ref->getName()) {
+                    continue;
+                }
+
+                // Skip constructor-promoted properties — already set via constructor injection
+                if ($property->isPromoted() || isset($seen[$property->getName()])) {
+                    continue;
+                }
+
+                $injectAttrs    = $property->getAttributes(Inject::class);
+                $autowiredAttrs = $property->getAttributes(Autowired::class);
+                $lazyAttrs      = $property->getAttributes(Lazy::class);
+                if (empty($injectAttrs) && empty($autowiredAttrs) && empty($lazyAttrs)) {
+                    continue;
+                }
+
+                $seen[$property->getName()] = true;
+
+                $id = !empty($injectAttrs)
+                    ? $injectAttrs[0]->newInstance()->id
+                    : null;
+                $type = $id ?? $property->getType()?->getName();
+
+                if ($type === null) {
+                    throw new ContainerException(
+                        "Cannot inject property [{$property->getName()}] — no type and no #[Inject] id."
+                    );
+                }
+
+                $plan[] = [
+                    'property' => $property,
+                    'type'     => $type,
+                    'lazy'     => !empty($lazyAttrs),
+                ];
+            }
+        }
+
+        return self::$cache[$key] = $plan;
+    }
 
     private function constructorParams(string $class): array
     {
