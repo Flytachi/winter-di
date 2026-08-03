@@ -205,6 +205,76 @@ not cached); otherwise it delegates to `make()`. Application code normally uses
 
 ---
 
+### `inject(object $instance): object`
+
+Fills the `#[Autowired]` / `#[Inject]` properties of an object **the caller built**, and
+returns that same instance. The second half of `make()`, exposed on its own.
+
+`make()` builds and injects together, which is right whenever the container owns
+construction. It is wrong when the caller must control the object's identity:
+
+```php
+public static function instance(?string $alias = null): static
+{
+    $repository = new static();                     // identity stays with the caller
+    Container::getInstance()->inject($repository);  // dependencies still arrive
+
+    if ($alias !== null) {
+        $repository->as($alias);
+    }
+    return $repository;
+}
+```
+
+A repository handle is the case this was added for. Its alias lives in per-object state,
+so joining one table twice needs two distinct handles; resolving them through `make()` on
+a `#[Singleton]` binding would return one shared object and the second alias would
+silently overwrite the first.
+
+The instance is never swapped and its constructor state is left alone. Injecting twice is
+harmless — the second pass writes the same resolutions.
+
+---
+
+### `flushRequestScope(): void`
+
+Ends the current request scope: the next resolution of a `#[Request]` binding builds a
+fresh instance. Singletons and transients are untouched — this ends a scope, it does not
+reset the container.
+
+Over HTTP the scope ends by itself, because a request is a coroutine and its context dies
+with it. Nothing else has that boundary:
+
+```php
+while ($this->isRunning()) {           // a worker body is ONE coroutine
+    $job = $queue->pop();
+
+    $container->flushRequestScope();    // ← declare where a unit of work begins
+    $ctx = $container->make(JobContext::class);
+    // ... work ...
+}
+```
+
+Without the call, a request-scoped bean resolved inside the loop lives for the whole run
+and hands each job the previous job's state. Only the code driving the loop knows where
+one unit ends, which is why this is explicit.
+
+---
+
+### `Container::isInitialized(): bool`
+
+Whether a container exists yet. For code reachable both from a booted application and
+from a bare script — asking is better than catching the exception `getInstance()` throws,
+because a missing container is a legitimate state there rather than an error.
+
+```php
+if (Container::isInitialized()) {
+    Container::getInstance()->inject($object);
+}
+```
+
+---
+
 ## PSR-11
 
 ### `get(string $id): mixed`

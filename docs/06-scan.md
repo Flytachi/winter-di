@@ -62,6 +62,37 @@ that must run on every boot (commands, annotations, route maps that aren't cache
 
 ---
 
+## Recognising a class
+
+Files are **tokenised**, not pattern-matched. A missed class is registered nowhere — no
+binding, no routes, no discovery of any kind — and nothing reports it: the controller
+simply has no routes, the service simply is not in the container. That silence is why the
+parsing is exact rather than approximately right.
+
+Recognised regardless of formatting:
+
+```php
+#[Attr] class Foo {}            // an attribute sharing the line
+#[Attr] final class Foo {}
+namespace App { class Foo {} }  // indented inside a braced namespace
+class First {} class Second {}  // every class in the file, not only the first
+```
+
+Not mistaken for declarations:
+
+```php
+/* class Ghost */               // block comments
+/** class Ghost */              // docblocks
+$sql = 'class Ghost';           // strings and heredocs
+Other::class                    // the ::class constant
+new class {}                    // anonymous classes have no name
+```
+
+Only `class` is collected — interfaces, traits and enums are not, and abstract classes are
+dropped later by the dispatcher.
+
+---
+
 ## Excluding directories
 
 `vendor/` is always excluded automatically. Add more paths via `exclude()`:
@@ -75,6 +106,15 @@ Scanner::run($rootDir)
     ->collect(new DICollector($container))
     ->execute();
 ```
+
+Both sides of the comparison are resolved with `realpath()` before matching. The paths
+being tested come from `getRealPath()`, which follows symlinks, so an application served
+through one — `current -> releases/2026…`, the usual deploy layout — is excluded
+correctly instead of being walked in full.
+
+Directories worth excluding beyond `vendor/`: anywhere the application **writes** PHP
+(generated proxies, caches) and anywhere it keeps **templates**, since a view that happens
+to declare a helper class would otherwise be discovered and required.
 
 ---
 
@@ -132,6 +172,9 @@ The scanner skips abstract classes, interfaces, and traits before calling collec
 ## Performance
 
 - One `RecursiveIteratorIterator` pass over the project tree.
-- Class extraction uses two fast regexes (namespace + class name) — no AST parsing.
-- Production cache eliminates the FS walk on every boot after the first.
+- Class extraction tokenises each file. That costs roughly **35 µs more per file** than a
+  regular expression — about 11 ms on a 300-class project — and buys exactness: see
+  [Recognising a class](#recognising-a-class) for what a pattern cannot see.
+- The cost is paid on a **cold scan only**. With a warm cache the filesystem is not
+  touched at all: measured on a small application, 58.9 ms cold against 4.4 ms warm.
 - Collector dispatch is O(classes × collectors) with no internal caching — keep collectors lightweight.

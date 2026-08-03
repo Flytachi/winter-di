@@ -12,7 +12,13 @@ It provides autowiring, three lifecycle scopes, attribute-based configuration, a
 - **Three scopes** — `singleton`, `transient`, `request`
 - **Attributes** — `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]`, `#[Lazy]`
 - **Lazy injection** — `#[Lazy]` injects a native PHP 8.4 proxy; resolves on first use (breaks circular deps, like Spring `@Lazy`)
-- **Directory scan** — `Scanner` auto-discovers and registers annotated classes
+- **Directory scan** — `Scanner` auto-discovers and registers annotated classes; files are
+  tokenised, so a class is found whatever its formatting and is never confused with the
+  same words in a comment or a string
+- **Injection without construction** — `inject()` fills an object you built yourself, for
+  the cases where the caller must own the object's identity
+- **Explicit scope boundaries** — `flushRequestScope()` ends a request scope where nothing
+  ends it for you, such as a worker looping over jobs
 - **Service providers** — group related bindings in one place
 - **Contextual binding** — `contextual()` factories receive the consuming class (e.g. per-class loggers)
 - **Method injection** — `call()` resolves parameters of any callable

@@ -11,7 +11,7 @@ Autowiring, three lifecycle scopes, attribute-based configuration, and service p
 
 ## Requirements
 
-- PHP **8.3+**
+- PHP **8.4+**
 - `psr/container ^2.0`
 - `ext-swoole` *(optional)* — required for `request` scope coroutine isolation
 
@@ -59,6 +59,19 @@ $result = Container::getInstance()->call([UserController::class, 'index']);
 | `request` | One instance per request / coroutine | ✓ isolated via `Coroutine::getContext()` |
 
 Default scope when no attribute and no manual registration: **transient**.
+
+One rule decides every combination:
+
+> **A class may hold a reference to a shorter-lived object only if it does not outlive it.**
+
+Injected properties are resolved once, when the holder is built. A `#[Singleton]` holding
+a `#[Request]` bean therefore freezes the first request's instance for the worker's
+lifetime — silently, and transitively through any number of intermediate classes. See
+[Never hold a shorter-lived scope](docs/03-scopes.md#never-hold-a-shorter-lived-scope).
+
+Note also that `singleton` means **one per worker process**, not one per application: with
+four Swoole workers there are four instances, so a counter in a singleton field disagrees
+with itself depending on which worker answered.
 
 ---
 
@@ -148,10 +161,59 @@ $result = $c->call([$controller, 'store']);
 $result = $c->call(fn(UserService $s) => $s->all());
 $result = $c->call([ImportJob::class, 'run'], ['chunkSize' => 500]);
 
+// Injection into an object you built yourself
+$repository = new UserRepository();
+$c->inject($repository);      // fills #[Autowired] / #[Inject], returns the same object
+
+// Ending a request scope where nothing ends it for you (worker loops)
+$c->flushRequestScope();      // the next #[Request] resolution builds a fresh instance
+
+// Is there a container yet?
+Container::isInitialized();   // bool — for code that must work with or without one
+
 // PSR-11
 $c->has(UserService::class); // bool
 $c->get(UserService::class);  // mixed — alias for make()
 ```
+
+### `inject()` — construction and injection, separately
+
+`make()` builds *and* injects, which is right whenever the container owns construction.
+It is wrong when the caller must control the object's identity — a repository handle
+carrying a query alias, for instance: the alias lives in per-object state, so joining one
+table twice needs two distinct handles, and resolving them through `make()` on a shared
+binding would collapse both into one and silently lose an alias.
+
+```php
+public static function instance(?string $alias = null): static
+{
+    $repository = new static();                     // identity stays with the caller
+    Container::getInstance()->inject($repository);  // dependencies still arrive
+    // ...
+}
+```
+
+The instance is returned as passed — never swapped — and its constructor state is left
+alone. Calling it twice is harmless.
+
+### `flushRequestScope()` — ending a scope by hand
+
+`#[Request]` means *one instance per unit of work*. Over HTTP the unit is obvious: a
+request is a coroutine, and the scope dies with it. **A worker has no such boundary** —
+its whole body runs inside one coroutine, so a request-scoped bean resolved there
+survives every iteration and hands the next job the previous job's state.
+
+```php
+while ($this->isRunning()) {
+    $job = $queue->pop();
+
+    $c->flushRequestScope();               // ← this job is a new unit
+    $ctx = $c->make(JobContext::class);     // fresh, every time
+    // ... work ...
+}
+```
+
+Singletons are untouched: ending a scope is not resetting the container.
 
 ---
 
@@ -212,6 +274,41 @@ Scanner::run($rootDir)
 
 The cache stores only the list of discovered FQCNs as a plain PHP file — fast `require`,
 no serialization overhead. Delete the file to force a rescan.
+
+### How a class is recognised
+
+Files are **tokenised**, not pattern-matched. A missed class is registered nowhere — no
+binding, no routes, nothing — and nothing reports it, so the parsing has to be exact
+rather than approximately right. Tokenising costs roughly 35 µs more per file than a
+regular expression, and it is paid on a cold scan only.
+
+Recognised regardless of formatting:
+
+```php
+#[Attr] class Foo {}          // an attribute sharing the line
+#[Attr] final class Foo {}
+namespace App { class Foo {} } // indented inside a braced namespace
+class First {} class Second {} // every class in the file, not just the first
+```
+
+Not mistaken for declarations:
+
+```php
+/* class Ghost */              // block comments
+/** class Ghost */             // docblocks
+$sql = 'class Ghost';          // strings and heredocs
+Other::class                   // the ::class constant
+new class {}                   // anonymous classes have no name
+```
+
+Interfaces, traits and enums are not collected — only classes.
+
+### Exclusions
+
+`vendor/` is always excluded, and `exclude()` adds more. Both sides of the comparison are
+resolved with `realpath()`, so an application served through a symlink —
+`current -> releases/2026…`, the usual deploy layout — is excluded correctly rather than
+walked in full.
 
 ---
 
