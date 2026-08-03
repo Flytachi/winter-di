@@ -55,6 +55,15 @@ final class Container implements ContainerInterface
     private array $resolved = [];
 
     /**
+     * @var array<string, true>
+     * Which keys in $resolved hold request-scoped instances, so
+     * {@see flushRequestScope()} can drop those without walking every entry or
+     * re-deriving scopes. Only used off the coroutine path — under Swoole the
+     * instances live in the coroutine context instead.
+     */
+    private array $requestScoped = [];
+
+    /**
      * @var array<string, callable>
      * Consumer-aware factories registered via contextual(). Each factory receives
      * (Container $c, ?string $consumer) and is invoked only during dependency
@@ -90,6 +99,34 @@ final class Container implements ContainerInterface
             ?? throw new ContainerException(
                 'Container is not initialized. Call Container::init() at bootstrap.'
             );
+    }
+
+    /**
+     * Ends the current request scope: the next resolution of a `#[Request]` binding
+     * builds a fresh instance.
+     *
+     * Under HTTP the scope ends by itself — a request is a coroutine, and its context
+     * dies with it. Nothing else has that boundary. A long-lived worker looping over
+     * jobs runs its whole body in **one** coroutine, so a request-scoped bean resolved
+     * there survives every iteration and silently carries the previous job's state; off
+     * the coroutine path (FPM helpers, plain CLI) it lands in the process cache and does
+     * the same. Only the caller knows where one unit of work ends and the next begins,
+     * which is why this is explicit.
+     *
+     * Singletons are untouched — the point is to end a scope, not to reset the container.
+     */
+    public function flushRequestScope(): void
+    {
+        if (extension_loaded('swoole') && \Swoole\Coroutine::getCid() > 0) {
+            $ctx = \Swoole\Coroutine::getContext();
+            unset($ctx['__di']);
+        }
+
+        foreach (array_keys($this->requestScoped) as $abstract) {
+            unset($this->resolved[$abstract]);
+        }
+
+        $this->requestScoped = [];
     }
 
     /**
@@ -389,6 +426,7 @@ final class Container implements ContainerInterface
         } else {
             // FPM / CLI — process = request, use process-level cache
             $this->resolved[$abstract] = $instance;
+            $this->requestScoped[$abstract] = true;
         }
     }
 
