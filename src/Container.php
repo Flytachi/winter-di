@@ -92,6 +92,19 @@ final class Container implements ContainerInterface
             );
     }
 
+    /**
+     * Whether a container exists yet.
+     *
+     * For code that can work with or without one — a library reachable both from a booted
+     * application and from a bare script. Such code asks first instead of catching the
+     * exception {@see getInstance()} throws, since a missing container is a legitimate
+     * state there, not an error.
+     */
+    public static function isInitialized(): bool
+    {
+        return self::$instance !== null;
+    }
+
     // ── PSR-11 ────────────────────────────────────────────────────────────────
 
     public function get(string $id): mixed
@@ -235,6 +248,35 @@ final class Container implements ContainerInterface
         } finally {
             unset($this->building[$abstract]);
         }
+    }
+
+    /**
+     * Fill the `#[Autowired]` / `#[Inject]` properties of an object the caller built.
+     *
+     * The second half of {@see make()}, exposed on its own. `make()` builds *and* injects,
+     * which is right whenever the container owns construction; it is wrong when the caller
+     * must control the object's identity. A repository handle carrying a query alias is
+     * the case this was added for: the alias lives in per-object state, so two aliases of
+     * one table need two distinct objects, and resolving them through `make()` on a shared
+     * binding would collapse both into one and silently lose an alias.
+     *
+     * The instance is returned as passed — never swapped — and its constructor state is
+     * left alone. Calling this twice on the same object is harmless.
+     *
+     * ```
+     * $repository = new static();
+     * Container::getInstance()->inject($repository);
+     * ```
+     *
+     * @template T of object
+     * @param T $instance
+     * @return T The same instance, with its injectable properties filled.
+     */
+    public function inject(object $instance): object
+    {
+        $this->resolver->injectProperties($instance, $this);
+
+        return $instance;
     }
 
     /**
