@@ -177,6 +177,14 @@ final class Scanner
             new \RecursiveDirectoryIterator($rootDir, \RecursiveDirectoryIterator::SKIP_DOTS)
         );
 
+        // Both sides of the comparison must be canonical. The paths being tested come
+        // from getRealPath(), which resolves symlinks; the exclusions are built from the
+        // root as it was handed in, which usually is not resolved. A deploy that serves
+        // the application through a symlink — `current -> releases/2026…`, the standard
+        // layout — would therefore fail every exclusion, and the scan would walk vendor/
+        // in full: thousands of files read, tokenised and required.
+        $exclude = array_map(static fn(string $dir): string => realpath($dir) ?: $dir, $this->exclude);
+
         foreach ($iterator as $file) {
             /** @var \SplFileInfo $file */
             if ($file->getExtension() !== 'php') {
@@ -185,14 +193,13 @@ final class Scanner
 
             $realPath = $file->getRealPath();
 
-            foreach ($this->exclude as $ex) {
+            foreach ($exclude as $ex) {
                 if (str_starts_with($realPath, $ex)) {
                     continue 2;
                 }
             }
 
-            $class = $this->extractClass($realPath);
-            if ($class !== null) {
+            foreach ($this->extractClasses($realPath) as $class) {
                 $pairs[] = [$class, $realPath];
             }
         }
@@ -216,20 +223,131 @@ final class Scanner
         );
     }
 
-    private function extractClass(string $filePath): ?string
+    /**
+     * Every class declared in a file, fully qualified.
+     *
+     * Tokenised rather than matched with a regular expression, because the regular
+     * expression this replaces anchored on `^class` and therefore could not see:
+     *
+     *   - `#[Attr] class Foo` — anything sharing the line hid the declaration;
+     *   - `    class Foo` — a class indented inside a braced `namespace Foo { }`;
+     *   - a second class in the file — it returned the first match only;
+     *   - the difference between a declaration and the same words in a comment,
+     *     a string or a heredoc, so `/* class Ghost *\/` was "found" and the real
+     *     class below it was not.
+     *
+     * A missed class is registered nowhere — no DI binding, no routes, no health
+     * contributor — and nothing reports it. That silence is why this is exact now:
+     * a pattern can always be defeated by formatting, a token stream cannot.
+     *
+     * Only `class` counts, as before: interfaces, traits and enums are not collected,
+     * and an anonymous class has no name to collect.
+     *
+     * @return list<string>
+     */
+    private function extractClasses(string $filePath): array
     {
         $content = file_get_contents($filePath);
         if ($content === false) {
-            return null;
+            return [];
         }
 
+        $tokens = token_get_all($content);
+        $total = count($tokens);
         $namespace = '';
-        if (preg_match('/^namespace\s+([^;]+);/m', $content, $m)) {
-            $namespace = trim($m[1]) . '\\';
+        $classes = [];
+
+        for ($i = 0; $i < $total; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token)) {
+                continue;
+            }
+
+            if ($token[0] === T_NAMESPACE) {
+                $namespace = $this->readNamespace($tokens, $i, $total);
+                continue;
+            }
+
+            if ($token[0] !== T_CLASS) {
+                continue;
+            }
+
+            // `Foo::class` is a constant, not a declaration.
+            if ($this->previousMeaningful($tokens, $i) === T_DOUBLE_COLON) {
+                continue;
+            }
+
+            $name = $this->readClassName($tokens, $i, $total);
+            if ($name !== null) {
+                $classes[] = $namespace === '' ? $name : $namespace . '\\' . $name;
+            }
         }
 
-        if (preg_match('/^(?:(?:final|abstract|readonly)\s+)*class\s+(\w+)/m', $content, $m)) {
-            return $namespace . $m[1];
+        return $classes;
+    }
+
+    /**
+     * The namespace declared at $i, without a trailing separator.
+     *
+     * @param array<int, array{int, string, int}|string> $tokens
+     */
+    private function readNamespace(array $tokens, int $i, int $total): string
+    {
+        $name = '';
+
+        for ($j = $i + 1; $j < $total; $j++) {
+            $token = $tokens[$j];
+
+            // `;` ends a plain declaration, `{` a braced one — both end the name.
+            if ($token === ';' || $token === '{') {
+                break;
+            }
+            if (is_array($token) && in_array($token[0], [T_STRING, T_NAME_QUALIFIED, T_NS_SEPARATOR], true)) {
+                $name .= $token[1];
+            }
+        }
+
+        return trim($name, '\\');
+    }
+
+    /**
+     * The name following the `class` keyword at $i, or null for an anonymous class.
+     *
+     * @param array<int, array{int, string, int}|string> $tokens
+     */
+    private function readClassName(array $tokens, int $i, int $total): ?string
+    {
+        for ($j = $i + 1; $j < $total; $j++) {
+            $token = $tokens[$j];
+
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            return is_array($token) && $token[0] === T_STRING ? $token[1] : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * The id of the token before $i, ignoring whitespace and comments.
+     *
+     * @param array<int, array{int, string, int}|string> $tokens
+     */
+    private function previousMeaningful(array $tokens, int $i): ?int
+    {
+        for ($j = $i - 1; $j >= 0; $j--) {
+            $token = $tokens[$j];
+
+            if (is_array($token)) {
+                if (in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    continue;
+                }
+                return $token[0];
+            }
+
+            return null;
         }
 
         return null;
