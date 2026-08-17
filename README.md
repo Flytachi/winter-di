@@ -73,6 +73,13 @@ Note also that `singleton` means **one per worker process**, not one per applica
 four Swoole workers there are four instances, so a counter in a singleton field disagrees
 with itself depending on which worker answered.
 
+Resolving concurrently is safe in every scope. Each coroutine carries its own resolution
+stack, so a request that pauses on I/O halfway through a build — a factory opening a
+connection, say — never looks like a circular dependency to the requests running next to
+it. And when two coroutines want the same singleton while neither has it yet, the second
+waits for the first instead of building a second copy, so a factory's side effects happen
+once even on a cold worker.
+
 ---
 
 ## Attributes

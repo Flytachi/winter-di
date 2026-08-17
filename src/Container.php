@@ -71,8 +71,34 @@ final class Container implements ContainerInterface
      */
     private array $contextual = [];
 
-    /** @var array<string, true> Circular dependency guard */
+    /**
+     * @var array<string, true>
+     * Resolution stack for the circular dependency guard, off the coroutine path only —
+     * under Swoole it lives in the coroutine's context. See {@see buildStack()}.
+     */
     private array $building = [];
+
+    /**
+     * @var array<string, \Swoole\Coroutine\Channel>
+     * Singletons currently being built, one channel per class. A coroutine that wants a
+     * singleton somebody else has already started waits on its channel instead of
+     * building a second copy; the builder closes it, which wakes every waiter at once.
+     */
+    private array $singletonBuilds = [];
+
+    /** Key the per-coroutine resolution stack is stored under. */
+    private const string BUILD_KEY = '__di_building';
+
+    /**
+     * How long a coroutine waits for a singleton another one is building.
+     *
+     * A bound rather than an endless wait: if the builder dies in a way that skips its
+     * `finally` — a killed coroutine, a fatal — the waiters must not hang with it. Past
+     * the bound they build the instance themselves, which is what would have happened
+     * without any waiting at all, so the worst case degrades to the old behaviour instead
+     * of a deadlock.
+     */
+    private const float SINGLETON_WAIT_SECONDS = 5.0;
 
     private ReflectionResolver $resolver;
 
@@ -117,7 +143,7 @@ final class Container implements ContainerInterface
      */
     public function flushRequestScope(): void
     {
-        if (extension_loaded('swoole') && \Swoole\Coroutine::getCid() > 0) {
+        if ($this->inCoroutine()) {
             $ctx = \Swoole\Coroutine::getContext();
             unset($ctx['__di']);
         }
@@ -265,13 +291,22 @@ final class Container implements ContainerInterface
             }
         }
 
-        // Circular dependency guard
-        if (isset($this->building[$abstract])) {
+        // Circular dependency guard — the stack of this unit of work, nobody else's
+        $stack = $this->buildStack();
+        if (isset($stack[$abstract])) {
             throw new ContainerException(
-                "Circular dependency detected while resolving [{$abstract}]."
+                'Circular dependency detected while resolving ['
+                . implode('] → [', [...array_keys($stack), $abstract])
+                . '].'
             );
         }
-        $this->building[$abstract] = true;
+
+        // Somebody else is already building this singleton — wait for theirs
+        if ($scope === 'singleton' && empty($overrides) && $this->awaitSingleton($abstract)) {
+            return $this->resolved[$abstract];
+        }
+
+        $this->beginBuild($abstract, $scope);
 
         try {
             $instance = $this->doResolve($abstract, $overrides);
@@ -283,7 +318,7 @@ final class Container implements ContainerInterface
 
             return $instance;
         } finally {
-            unset($this->building[$abstract]);
+            $this->endBuild($abstract);
         }
     }
 
@@ -433,9 +468,101 @@ final class Container implements ContainerInterface
     /** Returns Swoole coroutine context array or null if not in a coroutine. */
     private function coroutineContext(): ?array
     {
-        if (extension_loaded('swoole') && \Swoole\Coroutine::getCid() > 0) {
+        if ($this->inCoroutine()) {
             return (array) (\Swoole\Coroutine::getContext()['__di'] ?? []);
         }
         return null;
+    }
+
+    private function inCoroutine(): bool
+    {
+        return extension_loaded('swoole') && \Swoole\Coroutine::getCid() > 0;
+    }
+
+    // ── Resolution stack ──────────────────────────────────────────────────────
+
+    /**
+     * The resolution stack of the current unit of work.
+     *
+     * Under Swoole one worker process serves many requests at once as coroutines, so a
+     * stack kept in a property would belong to all of them together. A request that pauses
+     * on I/O halfway through a resolution — a bean factory opening a Redis connection, say
+     * — would then make every other request resolving the same class see it as "already
+     * being built", and they would fail with a circular dependency that does not exist.
+     * The coroutine is the unit of work, so the stack lives in its context; off that path
+     * (FPM, CLI) a process handles one unit at a time and the property means the same.
+     *
+     * @return array<string, true> Insertion-ordered, so it doubles as the cycle's path.
+     */
+    private function buildStack(): array
+    {
+        if ($this->inCoroutine()) {
+            return (array) (\Swoole\Coroutine::getContext()[self::BUILD_KEY] ?? []);
+        }
+
+        return $this->building;
+    }
+
+    private function beginBuild(string $abstract, string $scope): void
+    {
+        if (!$this->inCoroutine()) {
+            $this->building[$abstract] = true;
+            return;
+        }
+
+        \Swoole\Coroutine::getContext()[self::BUILD_KEY][$abstract] = true;
+
+        // Only singletons are worth waiting for: a transient is a new object by contract,
+        // and a request-scoped one belongs to a single coroutine, so neither can be shared.
+        if ($scope === 'singleton') {
+            $this->singletonBuilds[$abstract] = new \Swoole\Coroutine\Channel(1);
+        }
+    }
+
+    private function endBuild(string $abstract): void
+    {
+        if (!$this->inCoroutine()) {
+            unset($this->building[$abstract]);
+            return;
+        }
+
+        $ctx = \Swoole\Coroutine::getContext();
+        unset($ctx[self::BUILD_KEY][$abstract]);
+
+        if (isset($this->singletonBuilds[$abstract])) {
+            $channel = $this->singletonBuilds[$abstract];
+            unset($this->singletonBuilds[$abstract]);
+            $channel->close();   // wakes every waiter at once, success or failure alike
+        }
+    }
+
+    /**
+     * Waits out a singleton another coroutine has already started building.
+     *
+     * Without this, moving the guard into the coroutine would trade a loud error for a
+     * quiet defect: two coroutines racing on the first resolution would each build their
+     * own instance, one overwriting the other in the cache while the loser keeps using an
+     * orphan — a singleton that is not one, with the factory's side effects run twice.
+     * Waiting costs nothing, since the waiter wakes no later than it would have finished
+     * building that second copy itself.
+     *
+     * @return bool Whether the instance is in the cache now, so the caller can return it.
+     */
+    private function awaitSingleton(string $abstract): bool
+    {
+        while (isset($this->singletonBuilds[$abstract])) {
+            // Returns as soon as the builder closes the channel; false on the bound, and
+            // then the loop re-checks rather than trusting the wake-up reason.
+            $this->singletonBuilds[$abstract]->pop(self::SINGLETON_WAIT_SECONDS);
+
+            if (array_key_exists($abstract, $this->resolved)) {
+                return true;
+            }
+
+            // Builder failed, or the wait ran out — build it here instead of hanging on.
+            break;
+        }
+
+        return array_key_exists($abstract, $this->resolved);
     }
 }

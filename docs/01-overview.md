@@ -24,8 +24,9 @@ It provides autowiring, three lifecycle scopes, attribute-based configuration, a
 - **Method injection** — `call()` resolves parameters of any callable
 - **Property injection** — `#[Autowired]` / `#[Inject]` on class properties, inherited private ones included
 - **Proxy-aware** — `ProxyInterface` keeps a generated subclass resolving under the identity it stands for
-- **Circular dependency detection** — throws on cycles
-- **Swoole-safe** — `request` scope uses `Coroutine::getContext()` for isolation
+- **Circular dependency detection** — throws on cycles, naming the whole chain (`A → B → A`)
+- **Swoole-safe** — `request` scope and the resolution stack live in `Coroutine::getContext()`;
+  a singleton wanted by two coroutines at once is built once, the second waits
 - **ReflectionCache** — per-process cache for `ReflectionClass` / `ReflectionMethod` / `ReflectionParameter[]`
 
 ---
