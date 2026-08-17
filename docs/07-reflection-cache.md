@@ -32,7 +32,7 @@ $ref->getAttributes();   // ReflectionAttribute[]
 Returns a cached `ReflectionEnum` for the given FQCN.
 
 ```php
-$ref = ReflectionCache::enumOf(UserService::class);
+$ref = ReflectionCache::enumOf(OrderStatus::class);   // an enum, not a class
 
 $ref->getBackingType();   // ReflectionNamedType|null
 ```

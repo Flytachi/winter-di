@@ -8,6 +8,7 @@ use Flytachi\Winter\DI\Attribute\Inject;
 use Flytachi\Winter\DI\Attribute\Singleton;
 use Flytachi\Winter\DI\Container;
 use Flytachi\Winter\DI\Exception\ContainerException;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
 use Swoole\Coroutine\WaitGroup;
@@ -57,8 +58,17 @@ class CoCycleB
  * circular dependency. The failure is silent in testing and shows up in production only
  * when two requests overlap on the same class.
  *
+ * Each test runs in its own process on purpose. Xdebug's function observers do not survive
+ * coroutine stacks: once a child coroutine has suspended and resumed, the interpreter
+ * segfaults in `xdebug_execute_user_code_end` at request shutdown — after the tests
+ * themselves have passed, so the report says OK and the exit code says 139. Every
+ * `xdebug.mode` does it, `coverage` included; the alternative is running the suite under
+ * `XDEBUG_MODE=off`, which nobody remembers to do. Here the crash lands in a child whose
+ * result is already out, and the run stays green wherever Xdebug happens to be loaded.
+ *
  * @requires extension swoole
  */
+#[RunTestsInSeparateProcesses]
 final class ContainerConcurrencyTest extends TestCase
 {
     protected function setUp(): void

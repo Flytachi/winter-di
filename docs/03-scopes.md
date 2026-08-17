@@ -132,9 +132,45 @@ Fixes, in order of preference:
 
 ---
 
+## Concurrent resolution
+
+One Swoole worker resolves for many requests at once, so the container has to tell "this
+class is being built **by me**" from "by somebody else". Both answers live per unit of
+work: the resolution stack sits in `Coroutine::getContext()['__di_building']`, next to the
+request-scope cache, and falls back to a plain property off the coroutine path, where a
+process handles one unit at a time.
+
+| Scope | Two coroutines resolve the same class at once |
+|-------|-----------------------------------------------|
+| `transient` | Each builds its own instance — that is the contract |
+| `request` | Each has its own instance by definition; nothing is shared |
+| `singleton` | The first builds it, the rest **wait** and receive that same instance |
+
+Waiting only ever happens on the first resolution of a singleton, while the cache is still
+empty: afterwards `make()` returns from the cache before any of this machinery runs. It
+costs nothing either — a waiter wakes no later than it would have finished building its
+own copy — and it is what keeps a factory's side effects (opening a connection, warming a
+cache) from running twice on a cold worker.
+
+This matters because a resolution can pause: a factory that opens a Redis connection under
+`SWOOLE_HOOK_ALL` yields mid-build. With a stack shared by the whole worker, every other
+request resolving that class would have seen it as "already being built" and failed with a
+circular dependency that does not exist.
+
+A genuine cycle is still caught — inside the coroutine that has it — and the message names
+the whole chain:
+
+```
+Circular dependency detected while resolving [App\A] → [App\B] → [App\A].
+```
+
+---
+
 ## Scope priority
 
-Manual registration always overrides the class attribute:
+Manual registration always overrides the class attribute — including for a class that has
+already been resolved, since re-registering drops both what the previous scope cached and
+its place on the request-scope flush list:
 
 ```php
 #[Singleton]

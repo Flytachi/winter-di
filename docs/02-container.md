@@ -17,8 +17,17 @@ Returns the container itself for fluent chaining:
 
 ```php
 Container::init()
-    ->scan(Kernel::$pathRoot)
-    ->register(AppServiceProvider::class);
+    ->register(AppServiceProvider::class)
+    ->register(DatabaseServiceProvider::class);
+```
+
+The container itself does not scan anything — discovery of `#[Singleton]` / `#[Request]` /
+`#[Transient]` classes belongs to [`Scanner`](06-scan.md) plus `DICollector`:
+
+```php
+Scanner::run($rootDir)
+    ->collect(new DICollector(Container::getInstance()))
+    ->execute();
 ```
 
 ---
@@ -71,8 +80,12 @@ $c->singleton(CacheInterface::class, fn($c) => new RedisCache(env('REDIS_HOST'))
 
 ### `transient(string $abstract, string|callable|null $concrete = null): static`
 
-Explicitly registers a **transient** binding. Equivalent to `bind()` when `$concrete` is a class string,
-but allows self-binding without specifying the concrete.
+Explicitly registers a **transient** binding. Same scope as `bind()`, but the concrete may
+be omitted for self-binding — `bind()` requires it.
+
+Like every other registration method, this drops whatever the previous scope left for
+`$abstract` — the cached instance **and** its place on the request-scope flush list — so an
+override applies even to a class that was already resolved.
 
 ```php
 $c->transient(QueryBuilder::class);
@@ -163,8 +176,13 @@ Resolves an abstract — a class, interface, or named value — from the contain
 Resolution order:
 1. Already-resolved singleton / set value (cache hit → zero overhead)
 2. Request-scope cache (Swoole coroutine context)
-3. Manual binding (`bind()` / `singleton()` / `request()`)
-4. Autowiring by class name (reflection + recursive resolution)
+3. Cycle check against **this** unit of work's resolution stack
+4. A singleton another coroutine is already building → wait for it, do not build a second
+5. Manual binding (`bind()` / `singleton()` / `request()`)
+6. Autowiring by class name (reflection + recursive resolution)
+
+Steps 3 and 4 are what make concurrent resolution safe — see
+[Scopes → Concurrent resolution](03-scopes.md#concurrent-resolution).
 
 ```php
 $service = $container->make(UserService::class);

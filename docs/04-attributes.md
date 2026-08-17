@@ -1,8 +1,10 @@
 # Attributes
 
 Attributes let classes declare their own scope and injection requirements without
-registering them manually in bootstrap. The container reads them during `scan()` or
-on first `make()`.
+registering them manually in bootstrap. Scope attributes are read either by
+[`DICollector`](06-scan.md) during a scan, which registers a matching binding, or — for a
+class the scan never saw — by the container itself on first `make()`. Injection attributes
+(`#[Autowired]`, `#[Inject]`, `#[Lazy]`) are read when the class is first built.
 
 Manual registration always takes priority over attributes.
 

@@ -19,9 +19,11 @@ use ReflectionClass;
  *
  * Bootstrap:
  * ```
- *   Container::init()
- *       ->scan(Kernel::$pathRoot)
- *       ->register(AppServiceProvider::class);
+ *   Container::init()->register(AppServiceProvider::class);
+ *
+ *   Scanner::run($rootDir)               // attribute discovery is the Scanner's job
+ *       ->collect(new DICollector(Container::getInstance()))
+ *       ->execute();
  * ```
  *
  * Resolution:
@@ -193,7 +195,7 @@ final class Container implements ContainerInterface
     public function bind(string $abstract, string|callable $concrete): static
     {
         $this->bindings[$abstract] = ['concrete' => $concrete, 'scope' => 'transient'];
-        unset($this->resolved[$abstract]);
+        $this->forget($abstract);
         return $this;
     }
 
@@ -206,7 +208,7 @@ final class Container implements ContainerInterface
     public function singleton(string $abstract, string|callable|null $concrete = null): static
     {
         $this->bindings[$abstract] = ['concrete' => $concrete ?? $abstract, 'scope' => 'singleton'];
-        unset($this->resolved[$abstract]);
+        $this->forget($abstract);
         return $this;
     }
 
@@ -218,6 +220,7 @@ final class Container implements ContainerInterface
     public function transient(string $abstract, string|callable|null $concrete = null): static
     {
         $this->bindings[$abstract] = ['concrete' => $concrete ?? $abstract, 'scope' => 'transient'];
+        $this->forget($abstract);
         return $this;
     }
 
@@ -230,7 +233,7 @@ final class Container implements ContainerInterface
     public function request(string $abstract, string|callable|null $concrete = null): static
     {
         $this->bindings[$abstract] = ['concrete' => $concrete ?? $abstract, 'scope' => 'request'];
-        unset($this->resolved[$abstract]);
+        $this->forget($abstract);
         return $this;
     }
 
@@ -400,6 +403,23 @@ final class Container implements ContainerInterface
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    /**
+     * Drops everything a previous scope left behind for $abstract, so re-registering it
+     * actually takes effect.
+     *
+     * Two things are left behind, and both have to go. The cached instance, because
+     * {@see make()} answers from the cache before it ever looks at the scope — a singleton
+     * built earlier would keep being handed out, and the new registration would silently
+     * do nothing. And the request-scope marker, because {@see flushRequestScope()} walks
+     * that list: a class that was request-scoped, got built, and was then re-registered as
+     * a singleton would have its new instance dropped at the end of the next request —
+     * a singleton that quietly stops being one.
+     */
+    private function forget(string $abstract): void
+    {
+        unset($this->resolved[$abstract], $this->requestScoped[$abstract]);
+    }
 
     private function doResolve(string $abstract, array $overrides): mixed
     {

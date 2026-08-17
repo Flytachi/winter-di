@@ -552,6 +552,25 @@ final class ContainerTest extends TestCase
         $b = $this->c->make(SingletonService::class);
         $this->assertNotSame($a, $b);
     }
+
+    /**
+     * Re-registering must drop whatever the previous scope cached, or the override is a
+     * no-op: make() answers from the cache before it ever looks at the scope, so the old
+     * singleton would keep coming back and "manual registration wins" would quietly stop
+     * being true. bind()/singleton()/request() always cleared it; transient() did not.
+     */
+    public function test_scope_override_applies_after_the_class_was_already_resolved(): void
+    {
+        $singleton = $this->c->make(SingletonService::class);   // cached as a singleton
+
+        $this->c->transient(SingletonService::class);
+
+        $a = $this->c->make(SingletonService::class);
+        $b = $this->c->make(SingletonService::class);
+
+        $this->assertNotSame($a, $b, 'transient must build a new instance every time');
+        $this->assertNotSame($singleton, $a, 'the cached singleton must not survive the override');
+    }
 }
 
 // ── Extra fixtures (need class_exists check in call() test) ───────────────────

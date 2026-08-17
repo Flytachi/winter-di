@@ -99,6 +99,27 @@ final class ContainerRequestScopeTest extends TestCase
         self::assertNotSame($before, $after, 'Transients were never shared to begin with.');
     }
 
+    /**
+     * Re-registering has to clear the request-scope bookkeeping too, not just the cached
+     * instance. A class that was request-scoped, got built, and was then re-registered as
+     * a singleton stays on the flush list otherwise — and the next end of a unit of work
+     * drops the singleton the container had just promised to keep.
+     */
+    public function test_a_rescoped_class_leaves_the_flush_list(): void
+    {
+        $c = Container::getInstance();
+
+        $c->request(RsFresh::class);
+        $c->make(RsFresh::class);          // cached for the unit, and marked as such
+
+        $c->singleton(RsFresh::class);     // same class, different promise
+        $shared = $c->make(RsFresh::class);
+
+        $c->flushRequestScope();
+
+        self::assertSame($shared, $c->make(RsFresh::class), 'the singleton must survive the flush');
+    }
+
     public function test_flushing_an_empty_scope_is_harmless(): void
     {
         $c = Container::getInstance();
