@@ -24,6 +24,8 @@ use ReflectionClass;
  * ```
  *   Scanner::run($rootDir)->collect(new DICollector($container))->execute();
  * ```
+ *
+ * @link https://winterframe.net/packages/di/api-reference#dicollector Which attribute maps to which registration
  */
 final readonly class DICollector implements CollectorInterface
 {

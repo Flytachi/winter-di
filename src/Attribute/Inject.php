@@ -35,6 +35,8 @@ use Attribute;
  *   #[Inject(RedisCache::class)]
  *   private CacheInterface $cache;
  * ```
+ *
+ * @link https://winterframe.net/packages/di/injecting-into-properties Named values and per-parameter overrides
  */
 #[Attribute(Attribute::TARGET_PARAMETER | Attribute::TARGET_PROPERTY)]
 final readonly class Inject

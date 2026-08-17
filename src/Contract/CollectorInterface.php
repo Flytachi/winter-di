@@ -19,6 +19,8 @@ use ReflectionClass;
  * Each collect() call receives one class. Heavy work (instantiation, binding)
  * should be deferred — collect() is called in a tight loop over potentially
  * hundreds of classes.
+ *
+ * @link https://winterframe.net/packages/di/api-reference#collectorinterface What a scan collector receives
  */
 interface CollectorInterface
 {

@@ -38,6 +38,8 @@ use ReflectionClass;
  *   * transient — new instance on every make()
  *
  * Default scope when no attribute and no manual registration: transient.
+ *
+ * @link https://winterframe.net/packages/di/api-reference#container Registration, resolution and scope boundaries
  */
 final class Container implements ContainerInterface
 {

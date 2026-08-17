@@ -31,6 +31,8 @@ use Flytachi\Winter\DI\Container;
  *       }
  *   }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/service-providers Grouping bindings, factories and named values
  */
 abstract class ServiceProvider
 {

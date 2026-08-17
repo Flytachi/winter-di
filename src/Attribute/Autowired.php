@@ -26,6 +26,8 @@ use Attribute;
  *       ) {}
  *   }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/injecting-into-properties Property injection, inherited privates included
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final readonly class Autowired

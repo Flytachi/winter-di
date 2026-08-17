@@ -19,6 +19,8 @@ use Attribute;
  *   #[Singleton]
  *   class UserService { ... }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/scopes#singleton One per process — and when that is the wrong choice
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class Singleton

@@ -31,6 +31,8 @@ use ReflectionClass;
  * Multiple collectors share a single filesystem pass — no duplicate tree walks.
  * The cache stores only the list of discovered FQCNs, not collector results.
  * vendor/ is always excluded. Additional exclusions via exclude().
+ *
+ * @link https://winterframe.net/packages/di/scanning-and-autodiscovery Class discovery, collectors and the scan cache
  */
 final class Scanner
 {

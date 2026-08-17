@@ -20,6 +20,8 @@ use Attribute;
  *   #[Request]
  *   class AuthContext { ... }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/scopes#request One per request, isolated per coroutine
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class Request

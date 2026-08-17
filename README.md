@@ -4,16 +4,15 @@
 [![PHP Version Require](https://img.shields.io/packagist/php-v/flytachi/winter-di.svg?style=flat-square)](https://packagist.org/packages/flytachi/winter-di)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE)
 
-Lightweight PSR-11 dependency injection container for the Winter framework.
-Autowiring, three lifecycle scopes, attribute-based configuration, and service providers.
+A PSR-11 dependency injection container for PHP 8.4+: you declare what a class needs as typed
+parameters, and the container builds the whole object graph — resolving every dependency by
+type, recursively, with the lifetime you asked for.
 
----
+One runtime dependency (`psr/container`), no configuration files. Built for the Winter
+framework, usable in any PSR-11 consumer, and safe in a long-lived Swoole worker where one
+process serves many requests at once.
 
-## Requirements
-
-- PHP **8.4+**
-- `psr/container ^2.0`
-- `ext-swoole` *(optional)* — required for `request` scope coroutine isolation
+📖 **[Documentation](https://winterframe.net/packages/di)** · [Quick start](https://winterframe.net/packages/di/quickstart) · [API reference](https://winterframe.net/packages/di/api-reference)
 
 ---
 
@@ -22,6 +21,9 @@ Autowiring, three lifecycle scopes, attribute-based configuration, and service p
 ```bash
 composer require flytachi/winter-di
 ```
+
+Requires PHP **8.4+** and `psr/container ^2.0`. `ext-swoole` is optional — it only matters for
+per-coroutine isolation of the `request` scope.
 
 ---
 
@@ -36,334 +38,171 @@ use Flytachi\Winter\DI\Collector\DICollector;
 $container = Container::init();
 
 Scanner::run(__DIR__ . '/src', cache: __DIR__ . '/var/cache/di.php')
-    ->collect(new DICollector($container))  // auto-register #[Singleton], #[Request], #[Transient]
+    ->collect(new DICollector($container))   // auto-register #[Singleton], #[Request], #[Transient]
     ->execute();
 
-$container->register(AppServiceProvider::class); // bind interfaces and factories
+$container->register(AppServiceProvider::class);   // bind interfaces and factories
 
 // Resolve anywhere
 $service = Container::getInstance()->make(UserService::class);
 
-// Call a method with full injection
+// Call a method with everything injected
 $result = Container::getInstance()->call([UserController::class, 'index']);
 ```
 
+Nothing else is required: a class with typed constructor parameters resolves without being
+registered at all.
+
 ---
 
-## Scopes
+## What you get
 
-| Scope | Lifetime | Safe in Swoole |
-|-------|----------|----------------|
-| `singleton` | One instance per process | ✓ if stateless |
-| `transient` | New instance on every `make()` | ✓ always |
-| `request` | One instance per request / coroutine | ✓ isolated via `Coroutine::getContext()` |
+- **Autowiring by type** — constructor parameters resolved recursively; you stop writing `new`
+  for services.
+- **Three explicit lifetimes** — `singleton`, `transient`, `request`, chosen by attribute or
+  binding.
+- **Attributes, not config** — `#[Singleton]`, `#[Autowired]`, `#[Inject]`, `#[Lazy]` live on
+  the class that they describe.
+- **Property injection** — including private properties declared in a parent class.
+- **Contextual factories** — `contextual()` receives the consuming class, which is how a logger
+  can name its channel after whoever injected it.
+- **Lazy proxies** — `#[Lazy]` injects a native PHP 8.4 proxy resolved on first use, the escape
+  hatch for a circular dependency.
+- **One scan for everything** — `Scanner` walks the tree once and feeds every collector;
+  tokenised, so a class is found whatever its formatting, with an optional production cache.
+- **Swoole-safe** — request scope and the resolution stack live in the coroutine's context;
+  concurrent resolution never invents a circular dependency, and a singleton is built once even
+  when a cold worker is hit by many requests at once.
 
-Default scope when no attribute and no manual registration: **transient**.
+---
+
+## Scopes in one table
+
+| Scope | Lifetime | Concurrent `make()` of the same class |
+|-------|----------|---------------------------------------|
+| `singleton` | one instance per **worker process** | first builds it, the rest wait and get it |
+| `transient` | new instance every time *(default)* | each builds its own |
+| `request` | one per request / coroutine | each coroutine has its own |
 
 One rule decides every combination:
 
 > **A class may hold a reference to a shorter-lived object only if it does not outlive it.**
 
-Injected properties are resolved once, when the holder is built. A `#[Singleton]` holding
-a `#[Request]` bean therefore freezes the first request's instance for the worker's
-lifetime — silently, and transitively through any number of intermediate classes. See
-[Never hold a shorter-lived scope](docs/03-scopes.md#never-hold-a-shorter-lived-scope).
-
-Note also that `singleton` means **one per worker process**, not one per application: with
-four Swoole workers there are four instances, so a counter in a singleton field disagrees
-with itself depending on which worker answered.
-
-Resolving concurrently is safe in every scope. Each coroutine carries its own resolution
-stack, so a request that pauses on I/O halfway through a build — a factory opening a
-connection, say — never looks like a circular dependency to the requests running next to
-it. And when two coroutines want the same singleton while neither has it yet, the second
-waits for the first instead of building a second copy, so a factory's side effects happen
-once even on a cold worker.
+Injected properties are resolved once, when the holder is built. A `#[Singleton]` holding a
+`#[Request]` bean therefore freezes the first request's instance for the worker's lifetime —
+silently, and transitively through any number of intermediate classes. With an authentication
+context in that position, every user after the first is served under the first user's identity.
+See [Scopes](https://winterframe.net/packages/di/scopes).
 
 ---
 
-## Attributes
+## A taste of the API
 
 ```php
-use Flytachi\Winter\DI\Attribute\Singleton;
-use Flytachi\Winter\DI\Attribute\Transient;
-use Flytachi\Winter\DI\Attribute\Request;
-use Flytachi\Winter\DI\Attribute\Autowired;
-use Flytachi\Winter\DI\Attribute\Inject;
+// Registration
+$c->bind(CacheInterface::class, RedisCache::class);        // transient
+$c->singleton(CacheInterface::class, RedisCache::class);   // one per process
+$c->request(AuthContext::class);                           // one per request / coroutine
+$c->set('config.timeout', 30);                             // named value
 
-// Scope on class
-#[Singleton]
-class UserRepository { }
+$c->bind(MailerInterface::class, fn(Container $c) =>       // factory closure
+    new SmtpMailer(env('MAIL_HOST'), $c->make(LoggerInterface::class)));
 
-#[Request]
-class AuthContext { }
-
-#[Transient]
-class QueryBuilder { }
-
-// Injection overrides on constructor parameters
-class UserService
-{
-    public function __construct(
-        private UserRepository $repo,               // autowired by type (no attribute needed)
-
-        #[Inject(FileCache::class)]
-        private CacheInterface $fallback,           // specific implementation
-
-        #[Inject('config.timeout')]
-        private int $timeout,                       // named value
-    ) {}
-}
-
-// Property injection (when constructor is unavailable)
-class SomeCommand
-{
-    #[Autowired]                                    // by declared type — idiomatic choice
-    private UserService $service;
-
-    #[Inject(FileCache::class)]                     // specific implementation override
-    private CacheInterface $cache;
-}
-
-// Inherited properties are injected too, private ones included
-abstract class BaseCommand
-{
-    #[Autowired]
-    private LoggerInterface $logger;
-}
-```
-
----
-
-## Container API
-
-```php
-$c = Container::init();       // initialise (bootstrap)
-$c = Container::getInstance();// get anywhere
-
-// Binding
-$c->bind(CacheInterface::class, RedisCache::class);              // transient
-$c->singleton(CacheInterface::class, RedisCache::class);         // singleton
-$c->transient(QueryBuilder::class);                              // transient (explicit)
-$c->request(AuthContext::class);                                 // request-scoped
-$c->set('config.timeout', 30);                                   // named scalar / instance
-
-// Factory closure — receives the container
-$c->bind(MailerInterface::class, fn(Container $c) =>
-    new SmtpMailer(env('MAIL_HOST'), $c->make(LoggerInterface::class))
-);
-
-// Consumer-aware factory — receives the class being injected into
-$c->contextual(LoggerInterface::class, fn(Container $c, ?string $consumer) =>
-    LoggerFactory::getLogger($consumer ?? 'app')                 // #[Autowired] LoggerInterface → per-class logger
-);
+$c->contextual(LoggerInterface::class,                     // consumer-aware factory
+    fn(Container $c, ?string $consumer) => LoggerFactory::getLogger($consumer ?? 'app'));
 
 // Resolution
-$service = $c->make(UserService::class);
-$service = $c->make(UserService::class, ['timeout' => 60]); // with overrides
+$c->make(UserService::class);
+$c->make(ImportJob::class, ['chunkSize' => 500]);          // overrides — always built fresh
+$c->call(fn(UserService $s) => $s->all());                 // method / closure injection
 
-// Method / closure injection
-$result = $c->call([UserController::class, 'index']);
-$result = $c->call([$controller, 'store']);
-$result = $c->call(fn(UserService $s) => $s->all());
-$result = $c->call([ImportJob::class, 'run'], ['chunkSize' => 500]);
+// Injection without construction — the caller keeps the object's identity
+$c->inject($repository);
 
-// Injection into an object you built yourself
-$repository = new UserRepository();
-$c->inject($repository);      // fills #[Autowired] / #[Inject], returns the same object
-
-// Ending a request scope where nothing ends it for you (worker loops)
-$c->flushRequestScope();      // the next #[Request] resolution builds a fresh instance
-
-// Is there a container yet?
-Container::isInitialized();   // bool — for code that must work with or without one
-
-// PSR-11
-$c->has(UserService::class); // bool
-$c->get(UserService::class);  // mixed — alias for make()
+// Ending a request scope where nothing ends it for you (a worker loop)
+$c->flushRequestScope();
 ```
 
-### `inject()` — construction and injection, separately
-
-`make()` builds *and* injects, which is right whenever the container owns construction.
-It is wrong when the caller must control the object's identity — a repository handle
-carrying a query alias, for instance: the alias lives in per-object state, so joining one
-table twice needs two distinct handles, and resolving them through `make()` on a shared
-binding would collapse both into one and silently lose an alias.
-
 ```php
-public static function instance(?string $alias = null): static
+#[Singleton]
+class UserRepository {}
+
+class SomeCommand
 {
-    $repository = new static();                     // identity stays with the caller
-    Container::getInstance()->inject($repository);  // dependencies still arrive
-    // ...
+    #[Autowired]                       // by declared type
+    private UserService $service;
+
+    #[Inject('config.timeout')]        // named value
+    private int $timeout;
+
+    #[Lazy]                            // proxy now, resolved on first use
+    private ReportBuilder $reports;
 }
 ```
 
-The instance is returned as passed — never swapped — and its constructor state is left
-alone. Calling it twice is harmless.
-
-### `flushRequestScope()` — ending a scope by hand
-
-`#[Request]` means *one instance per unit of work*. Over HTTP the unit is obvious: a
-request is a coroutine, and the scope dies with it. **A worker has no such boundary** —
-its whole body runs inside one coroutine, so a request-scoped bean resolved there
-survives every iteration and hands the next job the previous job's state.
-
-```php
-while ($this->isRunning()) {
-    $job = $queue->pop();
-
-    $c->flushRequestScope();               // ← this job is a new unit
-    $ctx = $c->make(JobContext::class);     // fresh, every time
-    // ... work ...
-}
-```
-
-Singletons are untouched: ending a scope is not resetting the container.
-
----
-
-## Service providers
-
-```php
-use Flytachi\Winter\DI\Contract\ServiceProvider;
-use Flytachi\Winter\DI\Container;
-
-class AppServiceProvider extends ServiceProvider
-{
-    public function register(Container $c): void
-    {
-        $c->singleton(CacheInterface::class, RedisCache::class);
-        $c->request(AuthContext::class);
-        $c->set('config.timeout', (int) env('APP_TIMEOUT', 30));
-        $c->bind(MailerInterface::class, fn($c) =>
-            new SmtpMailer(env('MAIL_HOST'), $c->make(LoggerInterface::class))
-        );
-    }
-}
-
-// bootstrap.php
-Container::init()
-    ->register(AppServiceProvider::class)
-    ->register(DatabaseServiceProvider::class);
-```
-
----
-
-## Scanner
-
-`Scanner` walks the project tree once and dispatches every discovered class to all
-registered `CollectorInterface` implementations — a single filesystem pass, multiple consumers.
-
-```php
-use Flytachi\Winter\DI\Scanner;
-use Flytachi\Winter\DI\Collector\DICollector;
-
-// Without cache — always scans (dev mode, PPA, Cmd, Db collectors)
-Scanner::run($rootDir)
-    ->collect(new PpaCollector())
-    ->collect(new CmdCollector())
-    ->execute();
-
-// With cache — skips FS walk on cache hit (production)
-Scanner::run($rootDir, cache: '/var/cache/scanner.php')
-    ->collect(new DICollector($container))
-    ->collect(new MappingCollector($router))
-    ->execute();
-
-// Exclude additional directories (vendor/ is always excluded)
-Scanner::run($rootDir)
-    ->exclude(['/path/to/legacy', '/path/to/generated'])
-    ->collect(new DICollector($container))
-    ->execute();
-```
-
-The cache stores only the list of discovered FQCNs as a plain PHP file — fast `require`,
-no serialization overhead. Delete the file to force a rescan.
-
-### How a class is recognised
-
-Files are **tokenised**, not pattern-matched. A missed class is registered nowhere — no
-binding, no routes, nothing — and nothing reports it, so the parsing has to be exact
-rather than approximately right. Tokenising costs roughly 35 µs more per file than a
-regular expression, and it is paid on a cold scan only.
-
-Recognised regardless of formatting:
-
-```php
-#[Attr] class Foo {}          // an attribute sharing the line
-#[Attr] final class Foo {}
-namespace App { class Foo {} } // indented inside a braced namespace
-class First {} class Second {} // every class in the file, not just the first
-```
-
-Not mistaken for declarations:
-
-```php
-/* class Ghost */              // block comments
-/** class Ghost */             // docblocks
-$sql = 'class Ghost';          // strings and heredocs
-Other::class                   // the ::class constant
-new class {}                   // anonymous classes have no name
-```
-
-Interfaces, traits and enums are not collected — only classes.
-
-### Exclusions
-
-`vendor/` is always excluded, and `exclude()` adds more. Both sides of the comparison are
-resolved with `realpath()`, so an application served through a symlink —
-`current -> releases/2026…`, the usual deploy layout — is excluded correctly rather than
-walked in full.
-
----
-
-## ReflectionCache
-
-Per-process cache for reflection objects. Creates each `ReflectionClass`,
-`ReflectionMethod`, and `ReflectionParameter[]` once and reuses it for the
-process lifetime — critical in Swoole where workers handle many requests.
-
-```php
-use Flytachi\Winter\DI\ReflectionCache;
-
-$ref    = ReflectionCache::classOf(UserService::class);   // ReflectionClass
-$enum   = ReflectionCache::enumOf(Status::class);   // ReflectionEnum
-$method = ReflectionCache::method(UserService::class, 'handle'); // ReflectionMethod
-$params = ReflectionCache::parameters(UserService::class, 'handle'); // ReflectionParameter[]
-```
-
-Used internally by `ReflectionResolver` — available as a public utility for
-frameworks and libraries that perform their own reflection-based parameter resolution.
-
----
-
-## Exceptions
-
-| Exception | When |
-|-----------|------|
-| `ContainerException` | Circular dependency, unresolvable parameter, provider error |
-| `NotFoundException` | No binding and class does not exist |
-
-Both implement the PSR-11 interfaces (`ContainerExceptionInterface`, `NotFoundExceptionInterface`).
+Full signatures, defaults and edge cases: [API reference](https://winterframe.net/packages/di/api-reference).
 
 ---
 
 ## Documentation
 
-Full documentation is available in [`docs/`](docs/):
+The user-facing documentation lives at **[winterframe.net/packages/di](https://winterframe.net/packages/di)**
+(the link picks your language; RU and EN are both complete).
 
-| File | Contents |
-|------|----------|
-| [01-overview.md](docs/01-overview.md) | Features, installation, quick start |
-| [02-container.md](docs/02-container.md) | Complete Container API reference |
-| [03-scopes.md](docs/03-scopes.md) | Scopes — singleton, transient, request; Swoole behaviour |
-| [04-attributes.md](docs/04-attributes.md) | `#[Singleton]`, `#[Transient]`, `#[Request]`, `#[Autowired]`, `#[Inject]` |
-| [05-providers.md](docs/05-providers.md) | ServiceProvider — grouping bindings |
-| [06-scan.md](docs/06-scan.md) | Directory scan — auto-discovery |
-| [07-reflection-cache.md](docs/07-reflection-cache.md) | ReflectionCache — per-process reflection object cache, injection plan |
-| [08-proxies.md](docs/08-proxies.md) | ProxyInterface — generated subclasses that stand in for a service |
+**Start here**
+
+| Page | What it answers |
+|------|-----------------|
+| [Introduction](https://winterframe.net/packages/di/intro) | What the container is and whether you need it |
+| [Installation](https://winterframe.net/packages/di/installation) | Requirements, install, optional `ext-swoole` |
+| [Quick start](https://winterframe.net/packages/di/quickstart) | Bootstrap, auto-discovery, first resolved service |
+| [Mental model](https://winterframe.net/packages/di/mental-model) | How to think about it — and why the default is `transient` |
+
+**Guides**
+
+| Page | What it answers |
+|------|-----------------|
+| [Service providers](https://winterframe.net/packages/di/service-providers) | Grouping bindings, interface → implementation, factories |
+| [Scanning & auto-discovery](https://winterframe.net/packages/di/scanning-and-autodiscovery) | Registering classes without touching bootstrap; the scan cache |
+| [Injecting into properties](https://winterframe.net/packages/di/injecting-into-properties) | `#[Autowired]` vs `#[Inject]`, inherited private properties |
+| [Per-consumer logger](https://winterframe.net/packages/di/per-consumer-logger) | The classic `contextual()` recipe, end to end |
+| [Breaking circular dependencies](https://winterframe.net/packages/di/breaking-circular-dependencies) | Reading the error chain, and where to put `#[Lazy]` |
+
+**Reference**
+
+| Page | What it answers |
+|------|-----------------|
+| [API reference](https://winterframe.net/packages/di/api-reference) | Every method, contract and exception |
+| [Attributes](https://winterframe.net/packages/di/attributes) | All six attributes with their targets |
+| [Scopes](https://winterframe.net/packages/di/scopes) | Lifetimes, precedence, the Swoole safety matrix |
+
+**Deep dive**
+
+| Page | What it answers |
+|------|-----------------|
+| [Resolution lifecycle](https://winterframe.net/packages/di/resolution-lifecycle) | What `make()` does, step by step |
+| [Request scope & Swoole](https://winterframe.net/packages/di/request-scope-and-swoole) | Per-coroutine isolation, and the FPM/CLI fallback |
+| [Concurrent resolution](https://winterframe.net/packages/di/concurrent-resolution) | Many requests, one container — stacks and singleton waiting |
+| [Reflection cache](https://winterframe.net/packages/di/reflection-cache) | What is memoised per process, and the injection plan |
+| [Lazy proxies](https://winterframe.net/packages/di/lazy-proxies) | Deferred resolution, and what a proxy cannot do |
+
+Classes in this package carry an `@link` to their page, so the same documentation is one click
+away from your IDE.
+
+---
+
+## Contributing
+
+Internal technical notes — exact contracts, invariants, and the reasoning behind decisions that
+are not obvious from the code — live in [`docs/`](docs/README.md). Read that before changing
+resolution behaviour.
+
+```bash
+composer test        # phpunit
+composer test-detail # phpunit --testdox
+composer cs-check    # phpcs
+composer cs-fix      # phpcbf
+```
 
 ---
 

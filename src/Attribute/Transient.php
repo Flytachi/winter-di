@@ -17,6 +17,8 @@ use Attribute;
  *   #[Transient]
  *   class QueryBuilder { ... }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/scopes#transient The default lifetime and what belongs in it
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class Transient

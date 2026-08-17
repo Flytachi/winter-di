@@ -21,6 +21,8 @@ use ReflectionParameter;
  * $method = ReflectionCache::method(UserService::class, 'handle');
  * $params = ReflectionCache::parameters(UserService::class, 'handle');
  * ```
+ *
+ * @link https://winterframe.net/packages/di/reflection-cache What is memoised per process, and why
  */
 final class ReflectionCache
 {

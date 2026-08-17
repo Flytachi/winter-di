@@ -30,6 +30,8 @@ use Attribute;
  *       ) {}
  *   }
  * ```
+ *
+ * @link https://winterframe.net/packages/di/lazy-proxies Deferred resolution and breaking a circular dependency
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final readonly class Lazy

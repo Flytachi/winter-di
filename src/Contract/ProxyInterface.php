@@ -33,6 +33,8 @@ namespace Flytachi\Winter\DI\Contract;
  *
  * Implementations are expected to extend their target, so the instance stays
  * type-compatible with everything that depends on it.
+ *
+ * @link https://winterframe.net/packages/di/api-reference#proxyinterface How a proxy keeps its target identity
  */
 interface ProxyInterface
 {
