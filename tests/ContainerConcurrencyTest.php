@@ -34,6 +34,18 @@ class CoShared
     public static int $builds = 0;
 }
 
+/** A singleton slow enough to still be building when the next coroutine arrives. */
+#[Singleton]
+class CoSlowSingleton
+{
+    public const float BUILD_SECONDS = 0.2;
+
+    public function __construct(public int $n = 0)
+    {
+        Coroutine::sleep(self::BUILD_SECONDS);
+    }
+}
+
 class CoCycleA
 {
     public function __construct(public CoCycleB $b)
@@ -154,6 +166,85 @@ final class ContainerConcurrencyTest extends TestCase
 
         self::assertSame(1, CoShared::$builds, 'the factory must run once, not once per coroutine');
         self::assertCount(1, array_unique($instances), 'every coroutine gets the same instance');
+    }
+
+    /**
+     * A build with overrides is never cached, so nobody should ever queue behind it: the
+     * waiter would sleep through the whole build only to find an empty cache and build its
+     * own copy anyway — paying for two builds instead of one.
+     */
+    public function test_a_build_with_overrides_does_not_hold_up_a_plain_resolution(): void
+    {
+        $waited = 0.0;
+
+        $this->inCoroutines(function (Container $c) use (&$waited): void {
+            $group = new WaitGroup();
+            $group->add();
+            Coroutine::create(function () use ($c, $group): void {
+                $c->make(CoSlowSingleton::class, ['n' => 1]);   // not cacheable
+                $group->done();
+            });
+
+            Coroutine::sleep(0.02);                             // let it start and suspend
+
+            $group->add();
+            Coroutine::create(function () use ($c, $group, &$waited): void {
+                $started = microtime(true);
+                $c->make(CoSlowSingleton::class);
+                $waited = microtime(true) - $started;
+                $group->done();
+            });
+
+            $group->wait();
+        });
+
+        // Its own build and nothing more — waiting for the overrides build would roughly
+        // double this.
+        self::assertLessThan(CoSlowSingleton::BUILD_SECONDS * 1.5, $waited);
+    }
+
+    /**
+     * Two builds of the same singleton can overlap — one with overrides, one after a failed
+     * attempt — and the second replaces the first in the map of pending builds. Whoever was
+     * already waiting on the first channel must still be woken by its owner, not left to
+     * time out on a channel nobody closes.
+     */
+    public function test_a_waiter_is_never_left_behind_by_a_replaced_build(): void
+    {
+        $waited = 0.0;
+
+        $this->inCoroutines(function (Container $c) use (&$waited): void {
+            $group = new WaitGroup();
+
+            $group->add();
+            Coroutine::create(function () use ($c, $group): void {
+                $c->make(CoSlowSingleton::class, ['n' => 1]);
+                $group->done();
+            });
+
+            Coroutine::sleep(0.02);
+
+            $group->add();
+            Coroutine::create(function () use ($c, $group, &$waited): void {
+                $started = microtime(true);
+                $c->make(CoSlowSingleton::class);
+                $waited = microtime(true) - $started;
+                $group->done();
+            });
+
+            Coroutine::sleep(0.02);
+
+            $group->add();
+            Coroutine::create(function () use ($c, $group): void {
+                $c->make(CoSlowSingleton::class, ['n' => 2]);   // would replace the entry
+                $group->done();
+            });
+
+            $group->wait();
+        });
+
+        // Left behind, it would sleep out the five-second bound instead.
+        self::assertLessThan(1.0, $waited);
     }
 
     public function test_a_real_cycle_is_still_detected_inside_a_coroutine(): void

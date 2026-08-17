@@ -152,6 +152,16 @@ costs nothing either — a waiter wakes no later than it would have finished bui
 own copy — and it is what keeps a factory's side effects (opening a connection, warming a
 cache) from running twice on a cold worker.
 
+Two details keep that promise honest:
+
+- **Only a build whose result is cached is worth waiting for.** `make($abstract, $overrides)`
+  is never cached, so no channel is created for it — a waiter would otherwise sleep through
+  the whole build, find an empty cache, and build its own copy anyway.
+- **A builder wakes its own waiters.** Two builds of the same class can overlap and the
+  second replaces the first in the pending map; each closes the channel it created, and
+  removes the map entry only while it is still its own. Closing whatever happens to be in
+  the map instead would leave the other build's waiters asleep until the bound expires.
+
 This matters because a resolution can pause: a factory that opens a Redis connection under
 `SWOOLE_HOOK_ALL` yields mid-build. With a stack shared by the whole worker, every other
 request resolving that class would have seen it as "already being built" and failed with a

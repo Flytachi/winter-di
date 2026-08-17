@@ -211,6 +211,39 @@ final class ScannerTest extends TestCase
         $this->assertEmpty($collector->collected);
     }
 
+    /**
+     * The cache is `require`d without a lock, so it must never appear half-written: workers
+     * booting on a cold cache all write at once, and a partial file is a parse error the
+     * reader cannot catch. Writing to a neighbour and renaming is what guarantees that —
+     * this checks the visible half of it: no leftovers, and the result is loadable.
+     */
+    public function test_the_cache_file_is_never_left_half_written(): void
+    {
+        $this->writeClass('Eta.php', 'Eta', '');
+
+        foreach ([1, 2] as $_) {                       // a rewrite must be as safe as a first write
+            Scanner::run($this->tmpDir, cache: $this->cacheFile)
+                ->collect(new RecordingCollector())
+                ->execute();
+        }
+
+        $this->assertSame([], glob($this->cacheFile . '*.tmp'), 'no temporary file left behind');
+        $this->assertIsArray(require $this->cacheFile, 'the cache loads as an array');
+    }
+
+    public function test_an_unwritable_cache_path_does_not_break_the_scan(): void
+    {
+        $collector = new RecordingCollector();
+        $this->writeClass('Theta.php', 'Theta', '');
+
+        // A directory where the cache file cannot be created — scanning must still happen.
+        Scanner::run($this->tmpDir, cache: '/proc/winter-di-nope/scanner.php')
+            ->collect($collector)
+            ->execute();
+
+        $this->assertNotEmpty($collector->collected);
+    }
+
     public function test_no_cache_does_not_create_file(): void
     {
         $this->writeClass('Zeta.php', 'Zeta', '');

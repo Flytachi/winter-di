@@ -311,7 +311,7 @@ final class Container implements ContainerInterface
             return $this->resolved[$abstract];
         }
 
-        $this->beginBuild($abstract, $scope);
+        $channel = $this->beginBuild($abstract, $scope, empty($overrides));
 
         try {
             $instance = $this->doResolve($abstract, $overrides);
@@ -323,7 +323,7 @@ final class Container implements ContainerInterface
 
             return $instance;
         } finally {
-            $this->endBuild($abstract);
+            $this->endBuild($abstract, $channel);
         }
     }
 
@@ -525,23 +525,32 @@ final class Container implements ContainerInterface
         return $this->building;
     }
 
-    private function beginBuild(string $abstract, string $scope): void
+    /**
+     * @param bool $shareable Whether the result will be cached, i.e. worth waiting for.
+     * @return \Swoole\Coroutine\Channel|null The channel other coroutines wait on, if any.
+     */
+    private function beginBuild(string $abstract, string $scope, bool $shareable): ?object
     {
         if (!$this->inCoroutine()) {
             $this->building[$abstract] = true;
-            return;
+            return null;
         }
 
         \Swoole\Coroutine::getContext()[self::BUILD_KEY][$abstract] = true;
 
-        // Only singletons are worth waiting for: a transient is a new object by contract,
-        // and a request-scoped one belongs to a single coroutine, so neither can be shared.
-        if ($scope === 'singleton') {
-            $this->singletonBuilds[$abstract] = new \Swoole\Coroutine\Channel(1);
+        // Only a build whose result gets cached is worth waiting for. A transient is a new
+        // object by contract and a request-scoped one belongs to a single coroutine, so
+        // neither can be shared — and a build with overrides is deliberately never cached
+        // (see make()), so a waiter would sleep through it only to find nothing and build
+        // its own anyway.
+        if ($scope !== 'singleton' || !$shareable) {
+            return null;
         }
+
+        return $this->singletonBuilds[$abstract] = new \Swoole\Coroutine\Channel(1);
     }
 
-    private function endBuild(string $abstract): void
+    private function endBuild(string $abstract, ?object $channel): void
     {
         if (!$this->inCoroutine()) {
             unset($this->building[$abstract]);
@@ -551,11 +560,18 @@ final class Container implements ContainerInterface
         $ctx = \Swoole\Coroutine::getContext();
         unset($ctx[self::BUILD_KEY][$abstract]);
 
-        if (isset($this->singletonBuilds[$abstract])) {
-            $channel = $this->singletonBuilds[$abstract];
-            unset($this->singletonBuilds[$abstract]);
-            $channel->close();   // wakes every waiter at once, success or failure alike
+        if ($channel === null) {
+            return;
         }
+
+        // Drop the map entry only while it is still ours. A concurrent build may have
+        // replaced it, and removing somebody else's would leave their waiters asleep until
+        // the bound expires — while our own waiters are woken by closing our own channel.
+        if (($this->singletonBuilds[$abstract] ?? null) === $channel) {
+            unset($this->singletonBuilds[$abstract]);
+        }
+
+        $channel->close();   // wakes every waiter of this build, success or failure alike
     }
 
     /**

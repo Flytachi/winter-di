@@ -54,6 +54,8 @@ Everything else is detail; break one of these and the rest stops being true.
 2. **The default scope is `transient`** — no attribute, no registration, new object.
 3. **A resolution stack belongs to one unit of work** — a coroutine under Swoole, the
    process elsewhere. Cycle detection is per unit; it never sees another request's build.
+   Waiting is only ever done for a build whose result gets cached, and each builder wakes
+   its own waiters — see [Scopes → Concurrent resolution](03-scopes.md#concurrent-resolution).
 4. **`singleton` means one per worker process** — not one per application, and not one per
    coroutine.
 5. **Injected properties are resolved once, when the holder is built** — which is why a

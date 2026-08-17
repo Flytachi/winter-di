@@ -46,6 +46,14 @@ return [
 
 Delete the file to force a full rescan on next boot.
 
+The file is written to a temporary neighbour and renamed into place. Readers `require` it
+without taking a lock, and several workers booting on a cold cache all write at once — an
+in-place write is truncated when it is opened, so a reader would `require` an empty file
+(the cache silently stops working) or a partial one (a parse error it cannot catch). A
+measured half of concurrent reads saw exactly that before the rename was introduced.
+`opcache_invalidate()` follows the rename, since `validate_timestamps=0` — the usual
+production setting — would otherwise keep serving the previously compiled file.
+
 ---
 
 ## Without cache (dev / non-DI collectors)

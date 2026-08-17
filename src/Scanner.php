@@ -209,20 +209,47 @@ final class Scanner
         return $pairs;
     }
 
-    /** @param string[] $classNames */
+    /**
+     * Writes the cache in one atomic step.
+     *
+     * Readers `require` this file without taking a lock, so it must never be visible
+     * half-written. Writing in place cannot promise that: the file is truncated when it is
+     * opened, and `LOCK_EX` protects writers from each other, not a reader from a writer.
+     * A worker booting at that moment would `require` either an empty file — the cache
+     * silently stops working — or a partial one, which is a parse error it cannot catch.
+     * Not theoretical: with several workers starting on a cold cache they all write at
+     * once, and a measured half of concurrent reads saw an incomplete file.
+     *
+     * Writing to a temporary neighbour and renaming avoids it — `rename()` within one
+     * directory is atomic, so a reader sees the old file or the new one, never a mix.
+     *
+     * @param string[] $classNames
+     */
     private function writeCache(array $classNames): void
     {
-        $dir = dirname((string) $this->cachePath);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
+        $path = (string) $this->cachePath;
+
+        // No is_dir() check first: two workers racing here would both pass it and one would
+        // fail; letting mkdir() fail on an existing directory is the same outcome, quieter.
+        @mkdir(dirname($path), 0755, true);
 
         $export = var_export($classNames, true);
-        file_put_contents(
-            (string) $this->cachePath,
-            "<?php\n\nreturn {$export};\n",
-            LOCK_EX,
-        );
+        $tmp    = $path . '.' . getmypid() . '.tmp';
+
+        if (@file_put_contents($tmp, "<?php\n\nreturn {$export};\n") === false) {
+            return;                       // unwritable cache directory — scanning still works
+        }
+
+        if (!@rename($tmp, $path)) {
+            @unlink($tmp);                // another worker won the race; its file is the same
+            return;
+        }
+
+        // With validate_timestamps=0 — the usual production setting — opcache would keep
+        // serving whatever it compiled from this path before the rename.
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($path, true);
+        }
     }
 
     /**
