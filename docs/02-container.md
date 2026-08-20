@@ -308,3 +308,40 @@ if ($container->has(CacheInterface::class)) {
     $cache = $container->get(CacheInterface::class);
 }
 ```
+
+## When resolution fails
+
+Every failure arrives as a PSR-11 exception, and the message names the actual cause —
+the six of them are fixed in six different places.
+
+| What you asked for | Exception | What it tells you |
+| --- | --- | --- |
+| a name that exists nowhere | `NotFoundException` | `Class [X] not found. Check the autoloader and that the package providing it is installed.` |
+| an interface with no binding | `NotFoundException` | `[X] is an interface and has no binding. Bind it…` |
+| a trait | `NotFoundException` | `[X] is a trait and cannot be resolved.` |
+| an abstract class | `ContainerException` | `[X] is abstract and cannot be instantiated. Bind it to a concrete class…` |
+| an enum | `ContainerException` | `[X] is an enum and cannot be instantiated.` |
+| a class with a non-public constructor | `ContainerException` | `[X] cannot be instantiated: its constructor is not public. Provide it through a factory…` |
+
+The split follows PSR-11: `NotFoundException` means there is no entry to build,
+`ContainerException` means the entry was found and could not be built.
+
+`class_exists()` answers `true` for an abstract class and for an enum, so both used to
+walk past the container's own check and die inside `new` — as a raw `\Error`, which is
+not a `ContainerExceptionInterface`. Code that wrapped resolution in
+`catch (ContainerExceptionInterface)` never caught them. The instantiability check runs
+before construction now.
+
+That check deliberately runs *before* the constructor rather than catching `\Error`
+around it: an exception raised by the constructor's own body is the application's bug and
+is left exactly as it was thrown.
+
+```php
+try {
+    $service = $container->get(PaymentGateway::class);
+} catch (NotFoundExceptionInterface $e) {
+    // nothing to build — no binding, or the class is not installed
+} catch (ContainerExceptionInterface $e) {
+    // found, but not buildable — abstract, enum, private constructor, circular
+}
+```

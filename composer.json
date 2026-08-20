@@ -24,6 +24,7 @@
         "psr/container": "^2.0"
     },
     "require-dev": {
+        "swoole/ide-helper": "^6.0",
         "phpunit/phpunit": "@stable",
         "squizlabs/php_codesniffer": "@stable"
     },

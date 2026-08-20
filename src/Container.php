@@ -436,12 +436,39 @@ final class Container implements ContainerInterface
         }
 
         if (!class_exists($abstract)) {
-            throw new NotFoundException(
-                "No binding found for [{$abstract}] and it is not an instantiable class."
-            );
+            throw new NotFoundException(self::unresolvable($abstract));
         }
 
         return $this->resolver->resolve($abstract, $this, $overrides);
+    }
+
+    /**
+     * Why an id with no binding could not be turned into a class, and what to do about it.
+     *
+     * The three cases end up here through the same door — `class_exists()` is false for
+     * an interface and for a trait just as it is for a name that exists nowhere — but
+     * they are fixed in three different ways, and a single sentence covering all of them
+     * sends people looking in the wrong place. The most expensive misreading is the
+     * plain one: a missing class is an autoloader or an installation problem, and
+     * phrasing it as a container problem hides that entirely.
+     *
+     * @param string $abstract The identifier that could not be resolved.
+     */
+    private static function unresolvable(string $abstract): string
+    {
+        if (interface_exists($abstract)) {
+            return "[{$abstract}] is an interface and has no binding. "
+                . 'Bind it to an implementation with bind() or singleton(), '
+                . 'or provide one through a #[Bean] factory.';
+        }
+
+        if (trait_exists($abstract)) {
+            return "[{$abstract}] is a trait and cannot be resolved. "
+                . 'Ask the container for the class that uses it.';
+        }
+
+        return "Class [{$abstract}] not found. Check the autoloader "
+            . 'and that the package providing it is installed.';
     }
 
     private function scopeOf(string $abstract): string

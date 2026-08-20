@@ -29,8 +29,13 @@ final class ReflectionResolver
     public function resolve(string $class, Container $container, array $overrides = []): object
     {
         if (!class_exists($class)) {
-            throw new NotFoundException("Class [{$class}] does not exist.");
+            throw new NotFoundException(
+                "Class [{$class}] not found. Check the autoloader "
+                . 'and that the package providing it is installed.'
+            );
         }
+
+        self::assertInstantiable($class);
 
         $params = $this->constructorParams($class);
 
@@ -74,6 +79,39 @@ final class ReflectionResolver
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Refuses a class the engine could only reject with a raw `Error`.
+     *
+     * `class_exists()` answers true for an abstract class and for an enum, so both walk
+     * past the container's own check and die inside `new` — as `\Error`, which is not a
+     * `ContainerExceptionInterface`. Code that dutifully wraps its resolution in
+     * `catch (ContainerExceptionInterface)` never sees them, and PSR-11 says it should:
+     * anything that goes wrong while retrieving an entry belongs to that interface.
+     *
+     * Checking beforehand rather than catching `\Error` around `new` is deliberate — a
+     * `TypeError` thrown by the constructor's own body is the application's bug, and
+     * relabelling it as a container failure would bury it.
+     *
+     * @param class-string $class
+     * @throws ContainerException If the class cannot be instantiated at all.
+     */
+    private static function assertInstantiable(string $class): void
+    {
+        $ref = ReflectionCache::classOf($class);
+        if ($ref->isInstantiable()) {
+            return;
+        }
+
+        throw new ContainerException(match (true) {
+            $ref->isAbstract() => "[{$class}] is abstract and cannot be instantiated. "
+                . 'Bind it to a concrete class with bind() or singleton().',
+            $ref->isEnum() => "[{$class}] is an enum and cannot be instantiated. "
+                . 'Inject a case through a factory, or ask for the class that holds it.',
+            default => "[{$class}] cannot be instantiated: its constructor is not public. "
+                . 'Provide it through a factory — bind() with a closure, or #[Bean].',
+        });
+    }
 
     /**
      * Resolve the identity a concrete class stands for.
